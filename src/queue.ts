@@ -6,7 +6,6 @@ import { randomUUID } from 'node:crypto'
 import type { ExtensionContext, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
 import { debugLog } from './logger.js'
 import { WeixinClient } from './client.js'
-import { splitAndFilterMarkdown } from './message.js'
 import { fetchImageAsBase64, fetchFile, saveFileToDisk, type ImageData } from './media.js'
 import {
   ACK_TEXT,
@@ -370,19 +369,6 @@ export class MessageQueue {
         await client.sendText(first.userId, ACK_TEXT)
       } catch (err) {
         log(`发送回执失败: ${formatError(err)}`)
-      }
-    }
-  }
-
-  // --- 统一发送到微信 ---
-
-  async sendRepliesToWechat(replies: string[], targetUserId: string): Promise<void> {
-    const client = this.getClient()
-    if (!client) return
-    for (const reply of replies) {
-      const chunks = splitAndFilterMarkdown(reply)
-      for (const chunk of chunks) {
-        await client.sendText(targetUserId, chunk)
       }
     }
   }

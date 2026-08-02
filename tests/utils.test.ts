@@ -6,7 +6,6 @@ import { describe, it, expect } from 'vitest'
 import {
   ok,
   fail,
-  extractAllAssistantReplies,
   extractTextFromMessageContent,
   summarizePreview,
   formatError,
@@ -26,50 +25,6 @@ describe('ok / fail', () => {
   })
 })
 
-describe('extractAllAssistantReplies', () => {
-  it('extracts string content from assistant messages', () => {
-    const messages = [
-      { role: 'user', content: 'hello' },
-      { role: 'assistant', content: 'Hi there' },
-      { role: 'assistant', content: '  How can I help?  ' },
-    ]
-    expect(extractAllAssistantReplies(messages)).toEqual(['Hi there', 'How can I help?'])
-  })
-
-  it('extracts array content with text parts', () => {
-    const messages = [
-      {
-        role: 'assistant',
-        content: [
-          { type: 'text', text: 'Part 1' },
-          { type: 'toolCall', name: 'send_file' },
-          { type: 'text', text: 'Part 2' },
-        ],
-      },
-    ]
-    expect(extractAllAssistantReplies(messages)).toEqual(['Part 1\nPart 2'])
-  })
-
-  it('skips non-assistant messages', () => {
-    const messages = [
-      { role: 'user', content: 'hello' },
-      { role: 'toolResult', content: 'result' },
-    ]
-    expect(extractAllAssistantReplies(messages)).toEqual([])
-  })
-
-  it('skips empty assistant messages', () => {
-    const messages = [
-      { role: 'assistant', content: '' },
-      { role: 'assistant', content: '  ' },
-    ]
-    expect(extractAllAssistantReplies(messages)).toEqual([])
-  })
-
-  it('handles empty array', () => {
-    expect(extractAllAssistantReplies([])).toEqual([])
-  })
-})
 
 describe('extractTextFromMessageContent', () => {
   it('extracts from string', () => {

@@ -148,7 +148,7 @@ WeChat  ⇄  pi TUI session  ⇄  AI model + tools
 - WeChat messages are fetched via iLink Bot API long polling
 - Incoming messages are injected into the active pi session via `pi.sendUserMessage()`
 - When you type in TUI, a preview is sent to WeChat
-- AI replies are delivered incrementally (per `message_end`) and finalized on `agent_end`
+- AI replies are delivered incrementally (per `message_end`); the `agent_end` catch-up replay was removed to prevent duplicate historical messages after session restore
 - Only the TUI session that runs `/wechat start` holds the connection
 
 ## FAQ
@@ -304,7 +304,7 @@ pi install git:github.com/shenjiecode/pi-wechat-assistant
 - 微信消息通过 iLink Bot API 长轮询获取
 - 收到的消息通过 `pi.sendUserMessage()` 注入当前 pi 会话
 - TUI 输入时微信端会收到预览
-- AI 回复增量发送（每条 `message_end` 即发），`agent_end` 时补发遗漏
+- AI 回复增量发送（每条 `message_end` 即发），不依赖 `agent_end` 补发（防止恢复会话后历史回复重发）
 - 只有执行 `/wechat start` 的 TUI 会话持有连接
 
 ## 常见问题
@@ -460,7 +460,7 @@ WeChat  ⇄  pi TUIセッション  ⇄  AIモデル + ツール
 - WeChatメッセージはiLink Bot APIのロングポーリングで取得
 - 受信メッセージは `pi.sendUserMessage()` で現在のpiセッションに注入
 - TUIで入力するとWeChat側にプレビューが送信
-- AI返信は増分的に送信（`message_end` ごと）、`agent_end` で残りを補完
+- AI返信は増分的に送信（`message_end` ごと）、`agent_end` での補完は行わない（セッション復元後の過去返信重複送信を防止）
 - `/wechat start` を実行したTUIセッションのみが接続を保持
 
 ## FAQ
@@ -616,7 +616,7 @@ WeChat  ⇄  pi TUI 세션  ⇄  AI 모델 + 도구
 - WeChat 메시지는 iLink Bot API 롱 폴링으로 가져옴
 - 수신 메시지는 `pi.sendUserMessage()` 로 현재 pi 세션에 주입
 - TUI에서 입력하면 WeChat 측에 미리보기 전송
-- AI 응답은 증분 전송 (`message_end` 마다), `agent_end` 에서 나머지 보완
+- AI 응답은 증분 전송 (`message_end` 마다), `agent_end` 보완 없음 (세션 복원 후 과거 응답 중복 방지)
 - `/wechat start` 를 실행한 TUI 세션만 연결 유지
 
 ## FAQ

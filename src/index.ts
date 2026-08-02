@@ -15,7 +15,7 @@ import { splitAndFilterMarkdown } from './message.js'
 import { MessageQueue } from './queue.js'
 import { handleRemoteCommand, type RemoteCommandDeps } from './remote-commands.js'
 import { registerCommands, type CommandDeps } from './commands.js'
-import { ok, fail, formatError, isAbortError, extractAllAssistantReplies, extractTextFromMessageContent } from './utils.js'
+import { ok, fail, formatError, isAbortError, extractTextFromMessageContent } from './utils.js'
 import {
   POLL_RETRY_BASE_MS,
   POLL_RETRY_MAX_MS,
@@ -480,7 +480,9 @@ export default function wechatAssistant(pi: ExtensionAPI) {
     }
   })
 
-  // agent 结束 → 补发遗漏 + 收尾
+  // agent 结束 → 收尾（补发已移除：message_end 已逐条增量发送，
+  // 补发依赖 event.messages 为“本次 run”的范围假设，omp -c 恢复会话后
+  // messages 含全量历史，slice(sentCount) 会把历史回复全部重发到微信）
   pi.on('agent_end', async (event, ctx) => {
     latestCtx = ctx
     agentIdle = true
@@ -490,24 +492,6 @@ export default function wechatAssistant(pi: ExtensionAPI) {
     const msgCount = turn.messages.length
     const assistantMsgs = turn.messages.filter(m => m?.role === 'assistant').length
     log(`[AGENT-END] turn#${turn.seq} source=${turn.wechatConversationActive ? 'WECHAT' : 'TUI'} targetUser=${turn.targetUser} messages=${msgCount} assistant=${assistantMsgs} sentCount=${turn.sentCount}`)
-
-    const allReplies = extractAllAssistantReplies(turn.messages)
-    const newReplies = allReplies.slice(turn.sentCount)
-    log(`[AGENT-END-REPLIES] all=${allReplies.length} sent=${turn.sentCount} new=${newReplies.length}`)
-
-    if (turn.wechatConversationActive && newReplies.length > 0 && client && turn.targetUser) {
-      try {
-        await queue.sendRepliesToWechat(newReplies, turn.targetUser)
-        log(`[AGENT-END-DONE] sent ${newReplies.length} remaining replies`)
-      } catch (err) {
-        log(`[AGENT-END-ERROR] ${formatError(err)}`)
-        notify(`发送微信回复失败: ${formatError(err)}`, 'error')
-      }
-    } else if (allReplies.length === 0) {
-      log(`[AGENT-END-NOREPLY] no assistant text`)
-    } else {
-      log(`[AGENT-END-SAFE] all replies already sent incrementally`)
-    }
 
     if (queue.activeRequest) {
       await client?.stopTyping(queue.activeRequest.userId).catch(() => {})
