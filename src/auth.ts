@@ -29,12 +29,16 @@ export function getCredentialsPath(): string {
 // --- 通用文件辅助 ---
 
 async function ensureStateDir(): Promise<void> {
-  await fs.mkdir(STATE_DIR, { recursive: true })
+  await fs.mkdir(STATE_DIR, { recursive: true, mode: 0o700 })
+  // mkdir 的 mode 不会修改已有目录；尽力收紧旧安装的状态目录权限。
+  await fs.chmod(STATE_DIR, 0o700).catch(() => {})
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | null> {
   try {
     const content = await fs.readFile(filePath, 'utf-8')
+    // 旧版本创建的文件可能权限较宽；读取时顺手收紧，不因 chmod 失败影响启动。
+    await fs.chmod(filePath, 0o600).catch(() => {})
     return JSON.parse(content) as T
   } catch {
     return null
@@ -44,6 +48,8 @@ async function readJsonFile<T>(filePath: string): Promise<T | null> {
 async function writeJsonFile(filePath: string, data: unknown): Promise<void> {
   await ensureStateDir()
   await fs.writeFile(filePath, JSON.stringify(data, null, 2), { mode: 0o600 })
+  // writeFile 的 mode 不会修改已有文件。
+  await fs.chmod(filePath, 0o600)
 }
 
 async function deleteFile(filePath: string): Promise<void> {
@@ -81,6 +87,11 @@ export async function saveSeenIds(ids: Set<string>): Promise<void> {
   // 只保留最近 N 个，防止文件无限增长
   const trimmed = arr.length > MAX_SEEN_IDS ? arr.slice(arr.length - MAX_SEEN_IDS) : arr
   await writeJsonFile(SEEN_IDS_FILE, { ids: trimmed, updatedAt: new Date().toISOString() })
+}
+
+/** 登录身份变化后清除旧长轮询位置，避免跨凭证复用游标和去重记录。 */
+export async function clearTransportState(): Promise<void> {
+  await Promise.all([deleteFile(CURSOR_FILE), deleteFile(SEEN_IDS_FILE)])
 }
 
 // --- 凭证 ---

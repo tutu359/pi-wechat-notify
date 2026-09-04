@@ -16,6 +16,7 @@ import { MessageQueue } from './queue.js'
 import { handleRemoteCommand, type RemoteCommandDeps } from './remote-commands.js'
 import { registerCommands, type CommandDeps } from './commands.js'
 import { ok, fail, formatError, isAbortError, extractTextFromMessageContent } from './utils.js'
+import { isAuthorizedWeChatSender } from './security.js'
 import {
   POLL_RETRY_BASE_MS,
   POLL_RETRY_MAX_MS,
@@ -255,12 +256,16 @@ export default function wechatAssistant(pi: ExtensionAPI) {
   // --- 单条消息处理 ---
 
   async function handleIncomingMessage(message: IncomingMessage, activeClient: WeixinClient): Promise<void> {
+    // 客户端入口已有同样校验；这里保留边界防御，防止未来新增调用路径时绕过。
+    if (!isAuthorizedWeChatSender(message.raw.from_user_id, activeClient.userId)) {
+      log(`[AUTH] 丢弃未绑定用户消息: ${message.raw.from_user_id || '(empty)'}`)
+      return
+    }
     log(`收到消息: type=${message.type}, text=${message.text?.slice(0, 50)}, images=${message.imageUrls.length}`)
 
     if (UNSUPPORTED_TYPES.has(message.type)) {
       const reply = UNSUPPORTED_REPLY[message.type] ?? UNSUPPORTED_REPLY['unknown']
       try {
-        activeClient.rememberContext(message.raw)
         await activeClient.sendText(message.userId, reply)
       } catch (err) {
         log(`回复不支持类型消息失败: ${formatError(err)}`)
@@ -269,7 +274,6 @@ export default function wechatAssistant(pi: ExtensionAPI) {
     }
 
     if (message.text.startsWith('/')) {
-      activeClient.rememberContext(message.raw)
       const handled = await handleRemoteCommand(message.text, message.userId, activeClient, remoteCommandDeps)
       if (handled) return
     }

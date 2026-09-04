@@ -125,10 +125,15 @@ Advanced: `/thinking`, `/compact`. WeChat-side `/tools` is **disabled by default
 
 ```
 ~/.pi/agent/wechat-assistant/
-├── credentials.json   # Login credentials (mode 600)
-├── config.json        # Auto-start, image limits
-└── session.lock       # Exclusive lock file
+├── credentials.json    # Login credentials (mode 600)
+├── config.json         # Auto-start, remote tools, image limits (mode 600)
+├── context-tokens.json # Reply context for the bound user (mode 600)
+├── cursor.json         # Long-poll cursor (mode 600)
+├── seen-ids.json       # Recent message IDs for deduplication (mode 600)
+└── session.lock        # Exclusive lock file (mode 600)
 ```
+
+The state directory itself is restricted to mode `700`.
 
 `config.json` example:
 
@@ -147,6 +152,7 @@ WeChat  ⇄  pi TUI session  ⇄  AI model + tools
 ```
 
 - WeChat messages are fetched via iLink Bot API long polling
+- Only the WeChat user ID bound during QR login is accepted; messages from other users are ignored
 - Incoming messages are injected into the active pi session via `pi.sendUserMessage()`
 - When you type in TUI, a preview is sent to WeChat
 - AI replies are delivered incrementally (per `message_end`); the `agent_end` catch-up replay was removed to prevent duplicate historical messages after session restore
@@ -292,10 +298,15 @@ pi install git:github.com/shenjiecode/pi-wechat-assistant
 
 ```
 ~/.pi/agent/wechat-assistant/
-├── credentials.json   # 登录凭证（权限 600）
-├── config.json        # 自动启动、图片限制
-└── session.lock       # 排他锁文件
+├── credentials.json    # 登录凭证（权限 600）
+├── config.json         # 自动启动、远程工具、图片限制（权限 600）
+├── context-tokens.json # 绑定用户的回复上下文（权限 600）
+├── cursor.json         # 长轮询游标（权限 600）
+├── seen-ids.json       # 去重用的近期消息 ID（权限 600）
+└── session.lock        # 排他锁文件（权限 600）
 ```
+
+状态目录本身的权限为 `700`。
 
 ## 架构
 
@@ -304,6 +315,7 @@ pi install git:github.com/shenjiecode/pi-wechat-assistant
 ```
 
 - 微信消息通过 iLink Bot API 长轮询获取
+- 只接受扫码登录时绑定的微信用户，其他用户的消息会被忽略
 - 收到的消息通过 `pi.sendUserMessage()` 注入当前 pi 会话
 - TUI 输入时微信端会收到预览
 - AI 回复增量发送（每条 `message_end` 即发），不依赖 `agent_end` 补发（防止恢复会话后历史回复重发）
@@ -449,10 +461,15 @@ WeChatでテキスト、音声、画像を送るだけで通常の会話にな�
 
 ```
 ~/.pi/agent/wechat-assistant/
-├── credentials.json   # ログイン認証情報（権限 600）
-├── config.json        # 自動起動、画像制限
-└── session.lock       # 排他ロックファイル
+├── credentials.json    # ログイン認証情報（権限 600）
+├── config.json         # 自動起動、リモートツール、画像制限（権限 600）
+├── context-tokens.json # バインド済みユーザーの返信コンテキスト（権限 600）
+├── cursor.json         # ロングポーリングカーソル（権限 600）
+├── seen-ids.json       # 重複排除用の最近のメッセージID（権限 600）
+└── session.lock        # 排他ロックファイル（権限 600）
 ```
+
+状態ディレクトリ自体の権限は `700` です。
 
 ## アーキテクチャ
 
@@ -461,6 +478,7 @@ WeChat  ⇄  pi TUIセッション  ⇄  AIモデル + ツール
 ```
 
 - WeChatメッセージはiLink Bot APIのロングポーリングで取得
+- QRログインでバインドされたWeChatユーザーのみ受け付け、他のユーザーのメッセージは無視
 - 受信メッセージは `pi.sendUserMessage()` で現在のpiセッションに注入
 - TUIで入力するとWeChat側にプレビューが送信
 - AI返信は増分的に送信（`message_end` ごと）、`agent_end` での補完は行わない（セッション復元後の過去返信重複送信を防止）
@@ -606,10 +624,15 @@ WeChat에서 텍스트, 음성, 이미지를 보내면 일반 대화입니다. �
 
 ```
 ~/.pi/agent/wechat-assistant/
-├── credentials.json   # 로그인 자격 증명 (권한 600)
-├── config.json        # 자동 시작, 이미지 제한
-└── session.lock       # 배타적 잠금 파일
+├── credentials.json    # 로그인 자격 증명 (권한 600)
+├── config.json         # 자동 시작, 원격 도구, 이미지 제한 (권한 600)
+├── context-tokens.json # 연결된 사용자의 응답 컨텍스트 (권한 600)
+├── cursor.json         # 롱 폴링 커서 (권한 600)
+├── seen-ids.json       # 중복 제거용 최근 메시지 ID (권한 600)
+└── session.lock        # 배타적 잠금 파일 (권한 600)
 ```
+
+상태 디렉터리 자체의 권한은 `700`입니다.
 
 ## 아키텍처
 
@@ -618,6 +641,7 @@ WeChat  ⇄  pi TUI 세션  ⇄  AI 모델 + 도구
 ```
 
 - WeChat 메시지는 iLink Bot API 롱 폴링으로 가져옴
+- QR 로그인으로 연결된 WeChat 사용자만 허용하며 다른 사용자의 메시지는 무시
 - 수신 메시지는 `pi.sendUserMessage()` 로 현재 pi 세션에 주입
 - TUI에서 입력하면 WeChat 측에 미리보기 전송
 - AI 응답은 증분 전송 (`message_end` 마다), `agent_end` 보완 없음 (세션 복원 후 과거 응답 중복 방지)

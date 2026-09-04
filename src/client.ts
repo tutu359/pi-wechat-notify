@@ -17,6 +17,7 @@ import { createCipheriv } from 'node:crypto'
 import { readFile, open as fsOpen } from 'node:fs/promises'
 import { basename } from 'node:path'
 import { debugLog } from './logger.js'
+import { isAuthorizedWeChatSender } from './security.js'
 import type { Credentials, IncomingMessage, MessageItem, WeixinMessage } from './types.js'
 import {
   loadContextTokens,
@@ -153,10 +154,11 @@ export class WeixinClient {
 
   private async _init(): Promise<void> {
     const persisted = await loadContextTokens()
-    this._lastActiveUserId = persisted.lastUserId
-    for (const [userId, token] of Object.entries(persisted.tokens)) {
-      this.contextTokens.set(userId, token)
-    }
+    // context token 只允许属于当前扫码凭证绑定用户，避免旧凭证或旧版本
+    // 留下的其他用户状态被继续使用。
+    const ownToken = persisted.tokens[this.userId]
+    if (ownToken) this.contextTokens.set(this.userId, ownToken)
+    this._lastActiveUserId = persisted.lastUserId === this.userId ? this.userId : null
     // 恢复上次游标，避免重启后服务端重放历史消息导致重复回复
     this.cursor = await loadCursor()
     // 恢复已见消息 id（游标丢失/过期时兜底去重）
@@ -204,7 +206,12 @@ export class WeixinClient {
     const incoming: IncomingMessage[] = []
 
     for (const raw of response.msgs ?? []) {
-      this.rememberContext(raw)
+      // 授权必须发生在缓存 context token、解析内容和消息入队之前。
+      if (raw.message_type !== 1) continue
+      if (!isAuthorizedWeChatSender(raw.from_user_id, this.userId)) {
+        debugLog(`[AUTH] drop message from unbound user ${raw.from_user_id || '(empty)'}`)
+        continue
+      }
       const normalized = this.normalizeIncomingMessage(raw)
       if (!normalized) continue
       const id = normalized.messageId
@@ -220,6 +227,7 @@ export class WeixinClient {
           this._seenMessageIds.add(id)
         }
       }
+      this.rememberContext(raw)
       incoming.push(normalized)
     }
     // 持久化已见 id（fire-and-forget，节流由文件大小控制）
@@ -291,10 +299,13 @@ export class WeixinClient {
   // --- 上下文管理 ---
 
   rememberContext(raw: { from_user_id?: string; to_user_id?: string; context_token?: string; message_type?: number }): void {
-    const userId = raw.message_type === 1 ? raw.from_user_id : raw.to_user_id
-    if (userId && raw.context_token) {
-      this.contextTokens.set(userId, raw.context_token)
-      this._lastActiveUserId = userId
+    if (
+      raw.message_type === 1
+      && isAuthorizedWeChatSender(raw.from_user_id, this.userId)
+      && raw.context_token
+    ) {
+      this.contextTokens.set(this.userId, raw.context_token)
+      this._lastActiveUserId = this.userId
       this._contextTokensDirty = true
       this._schedulePersist()
     }
