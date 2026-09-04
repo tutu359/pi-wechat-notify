@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-09-04
+
+### Security
+- 仅接受扫码凭证绑定用户的微信消息，其他用户不会缓存上下文、进入队列或触发 Agent（感谢 JOM）
+- 微信端 `/tools` 默认禁用，只能从本机 TUI 显式开启
+- 状态目录和状态文件权限分别收紧为 `700` 和 `600`
+
+### Fixed
+- 持久化长轮询游标和近期消息 ID，防止重启后重复处理历史消息（感谢 midmirror）
+- 移除 `agent_end` 历史回复补发，防止恢复会话后重复发送全部旧回复（感谢 midmirror）
+- 强制重新登录或退出时清理旧凭证对应的游标、去重和上下文状态
+
+### Changed
+- CI 和发布工作流升级 GitHub Actions 运行时，并改用 `npm ci`
+
 ## [0.3.0] - 2026-06-11
 
 ### Added
