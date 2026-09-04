@@ -15,6 +15,8 @@ export interface RemoteCommandDeps {
   getCtx: () => Ctx | null
   client: () => WeixinClient | null
   queueLength: () => number
+  /** 微信端 /tools 是否已放行（由 TUI 端 /wechat remotetools 控制，默认关闭） */
+  isRemoteToolsEnabled: () => Promise<boolean>
 }
 
 type RemoteCommandFn = (args: string, userId: string, client: WeixinClient, deps: RemoteCommandDeps) => Promise<string | null>
@@ -65,6 +67,9 @@ const commands: Record<string, RemoteCommandFn> = {
   },
 
   async tools(args, _userId, _client, deps) {
+    if (!(await deps.isRemoteToolsEnabled())) {
+      return '🔒 出于安全考虑，微信端 /tools 默认禁用（它可修改本机工具权限）\n如需开启，请在电脑端 TUI 执行 /wechat remotetools on'
+    }
     if (!args) {
       const active = deps.pi.getActiveTools()
       const all = deps.pi.getAllTools().map(t => t.name)
@@ -252,7 +257,7 @@ const commands: Record<string, RemoteCommandFn> = {
       '/config          查看图片相关配置',
       '/help            显示帮助',
       '',
-      '高级: /thinking, /tools, /compact',
+      '高级: /thinking, /compact；/tools 默认禁用（电脑端执行 /wechat remotetools on 开启）',
       '直接发文字、语音、图片、文件 = 正常对话',
     ].join('\n')
   },

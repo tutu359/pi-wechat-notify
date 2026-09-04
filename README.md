@@ -79,6 +79,7 @@ All commands use `/wechat` with a subcommand:
 | `/wechat config image-wait <ms>` | Set batch wait time (default `8000`) |
 | `/wechat config image-max <MB>` | Set per-image size limit (default `50`) |
 | `/wechat autostart` | Toggle auto-start on session begin |
+| `/wechat remotetools` | Toggle WeChat-side `/tools` command (default **off**) |
 | `/wechat logout` | Clear credentials and stop |
 
 ## WeChat Remote Commands
@@ -96,7 +97,7 @@ Send text, voice, or images on WeChat to chat normally. Additional commands:
 | `/session` | Show session details |
 | `/help` | Show help |
 
-Advanced: `/thinking`, `/tools`, `/compact`.
+Advanced: `/thinking`, `/compact`. WeChat-side `/tools` is **disabled by default** (it can change local tool permissions); enable it in the TUI with `/wechat remotetools on`.
 
 ## Supported Message Types
 
@@ -245,6 +246,7 @@ pi install git:github.com/shenjiecode/pi-wechat-assistant
 | `/wechat config image-wait <ms>` | 设置图片批量等待时间，默认 `8000` |
 | `/wechat config image-max <MB>` | 设置单张图片大小上限，默认 `50` |
 | `/wechat autostart` | 开关自动启动 |
+| `/wechat remotetools` | 开关微信端 `/tools` 命令（默认**关闭**） |
 | `/wechat logout` | 清除凭证并停止 |
 
 ## 微信远程命令
@@ -262,7 +264,7 @@ pi install git:github.com/shenjiecode/pi-wechat-assistant
 | `/session` | 查看会话详情 |
 | `/help` | 显示帮助 |
 
-高级命令：`/thinking`、`/tools`、`/compact`。
+高级命令：`/thinking`、`/compact`。微信端 `/tools` 默认**禁用**（它可修改本机工具权限），可在电脑端 TUI 执行 `/wechat remotetools on` 开启。
 
 ## 支持的消息类型
 
@@ -401,6 +403,7 @@ WeChatでボットを見つけて、メッセージを送るだけです。
 | `/wechat config image-wait <ms>` | バッチ待機時間を設定（デフォルト `8000`） |
 | `/wechat config image-max <MB>` | 画像サイズ上限を設定（デフォルト `50`） |
 | `/wechat autostart` | セッション開始時の自動起動を切替 |
+| `/wechat remotetools` | WeChat 側 `/tools` コマンドの切替（デフォルト**無効**） |
 | `/wechat logout` | 認証情報をクリアして停止 |
 
 ## WeChatリモートコマンド
@@ -418,7 +421,7 @@ WeChatでテキスト、音声、画像を送るだけで通常の会話にな�
 | `/session` | セッション詳細を表示 |
 | `/help` | ヘルプを表示 |
 
-上級者向け：`/thinking`、`/tools`、`/compact`。
+上級者向け：`/thinking`、`/compact`。WeChat 側の `/tools` はデフォルトで**無効**です（ローカルのツール権限を変更できるため）。TUI で `/wechat remotetools on` を実行して有効化できます。
 
 ## 対応メッセージタイプ
 
@@ -557,6 +560,7 @@ WeChat에서 봇을 찾아 메시지를 보내기만 하면 됩니다.
 | `/wechat config image-wait <ms>` | 배치 대기 시간 설정 (기본값 `8000`) |
 | `/wechat config image-max <MB>` | 이미지 크기 제한 설정 (기본값 `50`) |
 | `/wechat autostart` | 세션 시작 시 자동 시작 전환 |
+| `/wechat remotetools` | WeChat 측 `/tools` 명령 전환 (기본 **비활성화**) |
 | `/wechat logout` | 자격 증명 지우기 및 중지 |
 
 ## WeChat 원격 명령어
@@ -574,7 +578,7 @@ WeChat에서 텍스트, 음성, 이미지를 보내면 일반 대화입니다. �
 | `/session` | 세션 상세 정보 |
 | `/help` | 도움말 표시 |
 
-고급: `/thinking`, `/tools`, `/compact`.
+고급: `/thinking`, `/compact`. WeChat 측 `/tools`는 기본적으로 **비활성화**되어 있습니다 (로컬 도구 권한을 변경할 수 있음). TUI에서 `/wechat remotetools on`으로 활성화하세요.
 
 ## 지원 메시지 유형
 

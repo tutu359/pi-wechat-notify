@@ -175,6 +175,7 @@ async function cmdConfig(args: string, ctx: Ctx, deps: CommandDeps): Promise<voi
   if (!key) {
     deps.notify([
       `自动启动: ${config.autoStart ? '已开启' : '已关闭'}`,
+      `微信 /tools: ${config.allowRemoteTools ? '已开启' : '已关闭（/wechat remotetools on 开启）'}`,
       `图片合并等待: ${getImageBatchWaitMs()}ms`,
       `图片上限: ${Math.round(getImageMaxBytes() / 1024 / 1024)}MB`,
       '', '用法:', '/wechat config image-wait 8000', '/wechat config image-max 50',
@@ -203,9 +204,25 @@ async function cmdAutostart(_args: string, ctx: Ctx, deps: CommandDeps): Promise
   deps.notify(`自动启动已${config.autoStart ? '开启 ✅' : '关闭 ❌'}`, 'info')
 }
 
+async function cmdRemoteTools(args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
+  deps.setLatestCtx(ctx)
+  const config = await loadConfig()
+  const arg = args.trim().toLowerCase()
+  if (arg === 'on' || arg === 'off') {
+    config.allowRemoteTools = arg === 'on'
+  } else if (arg === '') {
+    config.allowRemoteTools = !config.allowRemoteTools
+  } else {
+    deps.notify('用法: /wechat remotetools on|off（无参数则切换）', 'error')
+    return
+  }
+  await saveConfig(config)
+  deps.notify(`微信端 /tools 已${config.allowRemoteTools ? '开启 ✅（注意：微信消息将可修改本机工具权限）' : '关闭 ❌'}`, 'info')
+}
+
 export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
   pi.registerCommand('wechat', {
-    description: '微信桥接管理：login | start | stop | status | config | logout | autostart',
+    description: '微信桥接管理：login | start | stop | status | config | logout | autostart | remotetools',
     handler: async (args, ctx) => {
       const [sub, ...rest] = args.trim().split(/\s+/)
       const restArgs = rest.join(' ')
@@ -218,6 +235,7 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
         '/wechat config            查看/设置配置',
         '/wechat logout            清除凭证并停止',
         '/wechat autostart         开关自动启动',
+        '/wechat remotetools       开关微信端 /tools 命令（默认禁用）',
       ].join('\n')
       switch (sub) {
         case 'login': return cmdLogin(restArgs, ctx, deps)
@@ -227,6 +245,7 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
         case 'config': return cmdConfig(restArgs, ctx, deps)
         case 'logout': return cmdLogout(restArgs, ctx, deps)
         case 'autostart': return cmdAutostart(restArgs, ctx, deps)
+        case 'remotetools': return cmdRemoteTools(restArgs, ctx, deps)
         default: deps.notify(`未知子命令: ${sub || '(无)'}\n\n${help}`, 'warning')
       }
     },

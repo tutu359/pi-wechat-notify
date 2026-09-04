@@ -284,6 +284,7 @@ export default function wechatAssistant(pi: ExtensionAPI) {
     getCtx: () => latestCtx,
     client: () => client,
     queueLength: () => queue.pending,
+    isRemoteToolsEnabled: async () => (await loadConfig()).allowRemoteTools === true,
   }
 
   // --- TUI 命令注册 ---

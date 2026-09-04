@@ -74,6 +74,8 @@ export async function clearContextTokens(): Promise<void> {
 
 export interface BridgeConfig {
   autoStart?: boolean
+  /** 是否允许微信端 /tools 命令修改本机工具权限（安全考虑，默认关闭） */
+  allowRemoteTools?: boolean
   /** 图片批量合并等待时间；收到文字补充会立即处理 */
   imageBatchWaitMs?: number
   /** 单张图片最大下载大小，单位字节 */
