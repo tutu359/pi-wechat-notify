@@ -15,6 +15,8 @@ const CREDS_FILE = path.join(STATE_DIR, 'credentials.json')
 const CONFIG_FILE = path.join(STATE_DIR, 'config.json')
 const LOCK_FILE = path.join(STATE_DIR, 'session.lock')
 const CONTEXT_TOKENS_FILE = path.join(STATE_DIR, 'context-tokens.json')
+const CURSOR_FILE = path.join(STATE_DIR, 'cursor.json')
+const SEEN_IDS_FILE = path.join(STATE_DIR, 'seen-ids.json')
 
 export function getStateDir(): string {
   return STATE_DIR
@@ -50,6 +52,35 @@ async function deleteFile(filePath: string): Promise<void> {
   } catch {
     // ignore
   }
+}
+
+// --- 消息游标（跨重启持久化，防止重放历史消息导致重复回复） ---
+
+export async function loadCursor(): Promise<string> {
+  const data = await readJsonFile<{ cursor: string }>(CURSOR_FILE)
+  return data?.cursor ?? ''
+}
+
+export async function saveCursor(cursor: string): Promise<void> {
+  if (!cursor) return
+  await writeJsonFile(CURSOR_FILE, { cursor, updatedAt: new Date().toISOString() })
+}
+
+// --- 已见消息 id（持久化去重，游标丢失/过期时兜底防重发） ---
+
+const MAX_SEEN_IDS = 5_000
+
+export async function loadSeenIds(): Promise<Set<string>> {
+  const data = await readJsonFile<{ ids: string[] }>(SEEN_IDS_FILE)
+  return new Set(data?.ids ?? [])
+}
+
+export async function saveSeenIds(ids: Set<string>): Promise<void> {
+  const arr = Array.from(ids)
+  if (arr.length === 0) return
+  // 只保留最近 N 个，防止文件无限增长
+  const trimmed = arr.length > MAX_SEEN_IDS ? arr.slice(arr.length - MAX_SEEN_IDS) : arr
+  await writeJsonFile(SEEN_IDS_FILE, { ids: trimmed, updatedAt: new Date().toISOString() })
 }
 
 // --- 凭证 ---

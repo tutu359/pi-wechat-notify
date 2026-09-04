@@ -22,6 +22,10 @@ import {
   loadContextTokens,
   saveContextTokensThrottled,
   flushContextTokens,
+  loadCursor,
+  saveCursor,
+  loadSeenIds,
+  saveSeenIds,
 } from './auth.js'
 import {
   CDN_BASE,
@@ -130,6 +134,7 @@ export class WeixinClient {
   private cursor = ''
   private readonly typingTickets = new Map<string, string>()
   private readonly contextTokens = new Map<string, string>()
+  private _seenMessageIds = new Set<string>()
   private _lastActiveUserId: string | null = null
   private _contextTokensDirty = false
   private _disposed = false
@@ -152,6 +157,10 @@ export class WeixinClient {
     for (const [userId, token] of Object.entries(persisted.tokens)) {
       this.contextTokens.set(userId, token)
     }
+    // 恢复上次游标，避免重启后服务端重放历史消息导致重复回复
+    this.cursor = await loadCursor()
+    // 恢复已见消息 id（游标丢失/过期时兜底去重）
+    this._seenMessageIds = await loadSeenIds()
   }
 
   get accountId(): string { return this.credentials.accountId }
@@ -187,12 +196,35 @@ export class WeixinClient {
     }
 
     this.cursor = response.get_updates_buf || this.cursor
+    // 持久化游标（写失败不致命，下次可能重放；由 _seenMessageIds 兜底去重）
+    if (this.cursor) {
+      saveCursor(this.cursor).catch(() => {})
+    }
+
     const incoming: IncomingMessage[] = []
 
     for (const raw of response.msgs ?? []) {
       this.rememberContext(raw)
       const normalized = this.normalizeIncomingMessage(raw)
-      if (normalized) incoming.push(normalized)
+      if (!normalized) continue
+      const id = normalized.messageId
+      if (id && this._seenMessageIds.has(id)) {
+        debugLog(`[DEDUP] skip already-seen message ${id}`)
+        continue
+      }
+      if (id) {
+        this._seenMessageIds.add(id)
+        // 防止 Set 无限增长：超限重建（极端情况下去重失效，游标仍是主防线）
+        if (this._seenMessageIds.size > 10_000) {
+          this._seenMessageIds.clear()
+          this._seenMessageIds.add(id)
+        }
+      }
+      incoming.push(normalized)
+    }
+    // 持久化已见 id（fire-and-forget，节流由文件大小控制）
+    if (incoming.length > 0) {
+      saveSeenIds(this._seenMessageIds).catch(() => {})
     }
     return incoming
   }
