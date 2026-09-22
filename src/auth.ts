@@ -12,7 +12,6 @@ import type { Credentials } from './types.js'
 
 const STATE_DIR = path.join(os.homedir(), '.pi', 'agent', 'wechat-assistant')
 const CREDS_FILE = path.join(STATE_DIR, 'credentials.json')
-const CONFIG_FILE = path.join(STATE_DIR, 'config.json')
 const LOCK_FILE = path.join(STATE_DIR, 'session.lock')
 const CONTEXT_TOKENS_FILE = path.join(STATE_DIR, 'context-tokens.json')
 const CURSOR_FILE = path.join(STATE_DIR, 'cursor.json')
@@ -112,37 +111,6 @@ export async function clearContextTokens(): Promise<void> {
   await deleteFile(CONTEXT_TOKENS_FILE)
 }
 
-// --- 配置 ---
-
-export interface BridgeConfig {
-  autoStart?: boolean
-  /** 是否允许微信端 /tools 命令修改本机工具权限（安全考虑，默认关闭） */
-  allowRemoteTools?: boolean
-  /** 图片批量合并等待时间；收到文字补充会立即处理 */
-  imageBatchWaitMs?: number
-  /** 单张图片最大下载大小，单位字节 */
-  imageMaxBytes?: number
-}
-
-/** 内存缓存，供同步读取使用（由异步 initConfig / saveConfig 维护） */
-let _configCache: BridgeConfig | null = null
-
-export function getConfigCache(): BridgeConfig {
-  return _configCache ?? {}
-}
-
-export async function loadConfig(): Promise<BridgeConfig> {
-  if (_configCache) return _configCache
-  const data = await readJsonFile<BridgeConfig>(CONFIG_FILE)
-  _configCache = data ?? {}
-  return _configCache
-}
-
-export async function saveConfig(config: BridgeConfig): Promise<void> {
-  _configCache = config
-  await writeJsonFile(CONFIG_FILE, config)
-}
-
 // --- 简单文件锁 ---
 
 interface LockData {
@@ -179,7 +147,7 @@ export async function acquireLock(sessionId: string): Promise<{ success: boolean
     if (isProcessRunning(existing.pid)) {
       return {
         success: false,
-        message: `微信已被其他 pi 实例占用 (PID: ${existing.pid})，请先在那个实例中执行 /wechat-stop`,
+        message: `微信已被其他 pi 实例占用 (PID: ${existing.pid})，请先在那个实例中执行 /wechat logout`,
       }
     }
     // 进程不存在，锁已失效，可抢占

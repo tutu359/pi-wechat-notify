@@ -11,6 +11,7 @@ import {
   getQrCode,
   loadCredentials,
   pollQrStatus,
+  saveCredentials,
 } from './auth.js'
 import { renderQrCode } from './utils.js'
 import { daemonReload } from './daemon-client.js'
@@ -87,7 +88,6 @@ async function cmdLogin(args: string, ctx: Ctx, deps: CommandDeps): Promise<void
       if (result.status === 'scaned') { deps.notify('已扫码，请在手机上确认登录', 'info'); continue }
 
       if (result.status === 'confirmed' && result.credentials) {
-        const { saveCredentials } = await import('./auth.js')
         await saveCredentials(result.credentials)
         deps.setLoggedIn(true)
         deps.setState({ displayName: deps.getState()?.displayName ?? '(unknown)', targetUserId: result.credentials.userId })

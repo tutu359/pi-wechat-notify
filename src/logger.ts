@@ -2,7 +2,7 @@
 // 轻量调试日志（默认关闭）
 // ============================================================================
 
-import * as fs from 'node:fs'
+import { mkdirSync, appendFileSync } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 
@@ -21,8 +21,8 @@ export function debugLog(message: string): void {
   const line = `[${timestamp}] ${message}\n`
 
   try {
-    fs.mkdirSync(path.dirname(DEBUG_LOG_FILE), { recursive: true })
-    fs.appendFileSync(DEBUG_LOG_FILE, line, { mode: 0o600 })
+    mkdirSync(path.dirname(DEBUG_LOG_FILE), { recursive: true })
+    appendFileSync(DEBUG_LOG_FILE, line, { mode: 0o600 })
   } catch {
     // logging must never affect bridge behavior
   }

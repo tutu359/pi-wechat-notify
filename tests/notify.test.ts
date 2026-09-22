@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterAll } from 'vitest'
 import { sessionDisplayName, withPrefix, maybeConvertToTextFile, isPathInCwd } from '../src/notify.js'
-import * as fs from 'node:fs/promises'
+import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 
@@ -37,22 +37,39 @@ describe('maybeConvertToTextFile', () => {
     const long = 'x'.repeat(1001)
     const file = await maybeConvertToTextFile(long, 1000, tmpDir)
     expect(file).toBeTruthy()
-    expect((await fs.readFile(file!, 'utf-8'))).toBe(long)
-    await fs.rm(tmpDir, { recursive: true, force: true })
+    expect(fs.readFileSync(file!, 'utf-8')).toBe(long)
+    fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 })
 
 describe('isPathInCwd', () => {
-  const cwd = '/Users/x/proj'
+  // realpath 校验要求路径真实存在，用临时目录构造真实场景
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-wechat-sandbox-'))
+  const cwd = path.join(base, 'proj')
+  const outside = path.join(base, 'other')
+  fs.mkdirSync(cwd, { recursive: true })
+  fs.mkdirSync(outside, { recursive: true })
+  fs.writeFileSync(path.join(cwd, 'a.txt'), 'x')
+  fs.writeFileSync(path.join(outside, 'b.txt'), 'x')
+
   it('目录内允许', () => {
-    expect(isPathInCwd('/Users/x/proj/a/b.txt', cwd)).toBe(true)
-    expect(isPathInCwd('/Users/x/proj', cwd)).toBe(true)
+    expect(isPathInCwd(path.join(cwd, 'a.txt'), cwd)).toBe(true)
+    expect(isPathInCwd(cwd, cwd)).toBe(true)
   })
   it('目录外拒绝', () => {
-    expect(isPathInCwd('/Users/x/other/a.txt', cwd)).toBe(false)
-    expect(isPathInCwd('/Users/x/proj-evil/a.txt', cwd)).toBe(false)
+    expect(isPathInCwd(path.join(outside, 'b.txt'), cwd)).toBe(false)
   })
-  it('tmpdir 允许（长文本转存）', () => {
-    expect(isPathInCwd(path.join(os.tmpdir(), 'x.md'), cwd)).toBe(true)
+  it('路径不存在拒绝（realpath 校验）', () => {
+    expect(isPathInCwd(path.join(cwd, 'not-exist.txt'), cwd)).toBe(false)
   })
+  it('符号链接逃逸拒绝', () => {
+    const link = path.join(cwd, 'escape')
+    try { fs.symlinkSync(outside, link) } catch { /* 权限不足则跳过 */ }
+    if (fs.existsSync(link)) {
+      expect(isPathInCwd(path.join(link, 'b.txt'), cwd)).toBe(false)
+      fs.unlinkSync(link)
+    }
+  })
+
+  afterAll(() => fs.rmSync(base, { recursive: true, force: true }))
 })

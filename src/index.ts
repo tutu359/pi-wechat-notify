@@ -9,11 +9,12 @@
 // ============================================================================
 
 import { existsSync, statSync } from 'node:fs'
+import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { Type } from '@sinclair/typebox'
 // @ts-ignore — @earendil-works is the current package, but the older package still carries TS declarations used for compatibility here
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
-import { loadCredentials, loadConfig } from './auth.js'
+import { loadCredentials } from './auth.js'
 import { debugLog, isDebugEnabled } from './logger.js'
 import { registerCommands } from './commands.js'
 import {
@@ -93,19 +94,20 @@ export default function wechatAssistant(pi: ExtensionAPI) {
       ],
       parameters: Type.Object({
         text: Type.String({ description: '要发送的文本内容' }),
-        keepMarkdown: Type.Optional(Type.Boolean({ description: '保留 Markdown 原文不过滤（默认 false）' })),
       }),
       async execute(_toolCallId, params) {
         const target = requireTarget()
         if (!target) return fail('微信未连接，请先在 TUI 执行 /wechat login')
-        const text = withPrefix(state!.displayName, params.text)
         try {
           const filePath = await maybeConvertToTextFile(params.text, TEXT_TO_FILE_THRESHOLD, path.join(target.cwd, 'tmp'))
           if (filePath) {
+            // 长文本转文件：文件内容同样带会话前缀，保持消息来源可辨
+            const prefixed = withPrefix(state!.displayName, params.text)
+            await fs.writeFile(filePath, prefixed, 'utf-8')
             await daemonSendFile(target.userId, filePath, path.basename(filePath))
             return ok(`✅ 内容较长 (${params.text.length} 字)，已转为文件「${path.basename(filePath)}」发送到微信`)
           }
-          await daemonSendText(target.userId, text)
+          await daemonSendText(target.userId, withPrefix(state!.displayName, params.text))
           return ok('✅ 已发送到微信')
         } catch (err) {
           debugLog(`send_text_to_wechat 失败: ${formatError(err)}`)
@@ -217,14 +219,12 @@ export default function wechatAssistant(pi: ExtensionAPI) {
     }
 
     loggedIn = true
-    const config = await loadConfig()
     const sessionName = safeSessionName(ctx)
     state = {
       displayName: sessionDisplayName(sessionName, ctx.cwd),
       // 发送目标：绑定的微信账号（daemon 登录的 bot 对应的绑定用户）
       targetUserId: creds.userId,
     }
-    void config
     registerTools()
     updateStatusBar()
     debugLog(`[wechat] 会话已连接通知通道: prefix=${state.displayName}`)

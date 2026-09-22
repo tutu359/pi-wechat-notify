@@ -2,30 +2,20 @@
 // DaemonBridge — 扩展侧与 pi-wechat-daemon 的本地 HTTP 客户端
 //
 // 职责：
-//   1. 读取 ~/.pi/agent/wechat-assistant/daemon.json（port + token + pid）
+//   1. 读取 daemon.json（共享定义见 daemon-shared.ts）
 //   2. 探活 /status；不健康时自动拉起 daemon（node --import tsx daemon/index.ts）
 //   3. send-text / send-file / send-image 转发
 // ============================================================================
 
 import { spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import * as fs from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
-import { getStateDir } from './auth.js'
 import { debugLog } from './logger.js'
+import { DAEMON_PORT, DAEMON_FILE, DaemonRoutes, type DaemonInfo } from './daemon-shared.js'
 
-const DAEMON_FILE = path.join(getStateDir(), 'daemon.json')
-const DEFAULT_PORT = 7866
 const SPAWN_WAIT_ROUNDS = 25
 const SPAWN_WAIT_INTERVAL_MS = 200
-
-interface DaemonInfo {
-  port: number
-  token: string
-  pid: number
-  startedAt: string
-}
 
 export interface DaemonStatus {
   running: boolean
@@ -48,15 +38,6 @@ async function readDaemonInfo(): Promise<DaemonInfo | null> {
     return info?.port && info?.token ? info : null
   } catch {
     return null
-  }
-}
-
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
   }
 }
 
@@ -102,7 +83,7 @@ export async function probeDaemon(): Promise<{ info: DaemonInfo; status: DaemonS
       userId: string | null
       accountId: string | null
       pid: number
-    }>(info, '/status', undefined, 3_000)
+    }>(info, DaemonRoutes.status, undefined, 3_000)
     return {
       info,
       status: {
@@ -131,7 +112,7 @@ export async function ensureDaemon(): Promise<DaemonInfo> {
     cwd: PKG_ROOT,
     detached: true,
     stdio: 'ignore',
-    env: { ...process.env, PI_WECHAT_DAEMON_PORT: String(DEFAULT_PORT) },
+    env: { ...process.env, PI_WECHAT_DAEMON_PORT: String(DAEMON_PORT) },
   })
   child.unref()
 
@@ -145,33 +126,48 @@ export async function ensureDaemon(): Promise<DaemonInfo> {
   )
 }
 
-// --- 出站接口 ---
+// --- 出站接口（失败自动重发一次，再失败才抛错） ---
+
+async function withOneRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    debugLog(`[daemon-client] 发送失败，重试一次: ${formatErr(err)}`)
+    return await fn()
+  }
+}
+
+function formatErr(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
 
 export async function daemonSendText(userId: string, text: string): Promise<void> {
-  const info = await ensureDaemon()
-  await daemonRequest(info, '/send-text', { userId, text }, 30_000)
+  await withOneRetry(async () => {
+    const info = await ensureDaemon()
+    await daemonRequest(info, DaemonRoutes.sendText, { userId, text }, 30_000)
+  })
 }
 
 export async function daemonSendFile(userId: string, filePath: string, fileName?: string): Promise<void> {
-  const info = await ensureDaemon()
-  await daemonRequest(info, '/send-file', { userId, filePath, fileName }, 60_000)
+  await withOneRetry(async () => {
+    const info = await ensureDaemon()
+    await daemonRequest(info, DaemonRoutes.sendFile, { userId, filePath, fileName }, 60_000)
+  })
 }
 
 export async function daemonSendImage(userId: string, imagePath: string): Promise<void> {
-  const info = await ensureDaemon()
-  await daemonRequest(info, '/send-image', { userId, imagePath }, 60_000)
+  await withOneRetry(async () => {
+    const info = await ensureDaemon()
+    await daemonRequest(info, DaemonRoutes.sendImage, { userId, imagePath }, 60_000)
+  })
 }
 
 export async function daemonReload(): Promise<void> {
   const info = await ensureDaemon()
-  await daemonRequest(info, '/reload')
+  await daemonRequest(info, DaemonRoutes.reload)
 }
 
 export async function daemonShutdown(): Promise<void> {
   const probed = await probeDaemon()
-  if (probed) await daemonRequest(probed.info, '/shutdown')
-}
-
-export function newSessionId(): string {
-  return randomUUID()
+  if (probed) await daemonRequest(probed.info, DaemonRoutes.shutdown)
 }

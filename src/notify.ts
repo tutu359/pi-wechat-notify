@@ -2,8 +2,8 @@
 // 通知前缀与长文本转文件策略（纯函数，便于测试）
 // ============================================================================
 
-import * as os from 'node:os'
 import * as path from 'node:path'
+import { realpathSync } from 'node:fs'
 
 /** 长文本转文件的字数阈值 */
 export const TEXT_TO_FILE_THRESHOLD = 1_000
@@ -48,12 +48,13 @@ export async function maybeConvertToTextFile(
   return filePath
 }
 
-/** 确保路径在工作目录内（安全沙箱） */
+/** 确保路径在工作目录内（安全沙箱，realpath 防符号链接绕过） */
 export function isPathInCwd(targetPath: string, cwd: string): boolean {
-  const resolved = path.resolve(targetPath)
-  const resolvedCwd = path.resolve(cwd)
-  // 允许 os.tmpdir() 下的长文本转存文件
-  const tmp = path.resolve(os.tmpdir())
-  if (resolved.startsWith(tmp + path.sep)) return true
-  return resolved.startsWith(resolvedCwd + path.sep) || resolved === resolvedCwd
+  try {
+    const resolved = realpathSync(targetPath)
+    const resolvedCwd = realpathSync(cwd)
+    return resolved.startsWith(resolvedCwd + path.sep) || resolved === resolvedCwd
+  } catch {
+    return false
+  }
 }

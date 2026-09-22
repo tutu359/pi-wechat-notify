@@ -14,24 +14,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs/promises'
-import * as path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { WeixinClient, SessionExpiredError } from '../src/client.js'
-import { acquireLock, releaseLock, loadCredentials, getStateDir } from '../src/auth.js'
+import { acquireLock, releaseLock, loadCredentials } from '../src/auth.js'
 import { isAuthorizedWeChatSender } from '../src/security.js'
 import { debugLog } from '../src/logger.js'
+import { DAEMON_PORT, DAEMON_FILE, DaemonRoutes, type DaemonInfo } from '../src/daemon-shared.js'
 
-const STATE_DIR = getStateDir()
-const DAEMON_FILE = path.join(STATE_DIR, 'daemon.json')
-const PORT = Number(process.env.PI_WECHAT_DAEMON_PORT ?? 7866)
+const PORT = Number(process.env.PI_WECHAT_DAEMON_PORT ?? DAEMON_PORT)
 const DAEMON_SESSION = 'daemon'
-
-interface DaemonInfo {
-  port: number
-  token: string
-  pid: number
-  startedAt: string
-}
 
 // --- 共享状态 ---
 
@@ -42,7 +32,6 @@ let polling = false       // 轮询循环是否存活
 // --- daemon.json ---
 
 async function writeDaemonInfo(): Promise<string> {
-  await fs.mkdir(STATE_DIR, { recursive: true, mode: 0o700 })
   const token = randomUUID()
   const info: DaemonInfo = { port: PORT, token, pid: process.pid, startedAt: new Date().toISOString() }
   await fs.writeFile(DAEMON_FILE, JSON.stringify(info, null, 2), { mode: 0o600 })
@@ -73,15 +62,14 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`)
   const route = `${req.method} ${url.pathname}`
 
-  if (route !== 'GET /status') {
-    if ((req.headers.authorization ?? '') !== `Bearer ${token}`) {
-      sendJson(res, 401, { ok: false, error: 'unauthorized' })
-      return
-    }
+  // 所有路由（含 /status）都要求 Bearer token：防止本机其他进程探测账号信息
+  if ((req.headers.authorization ?? '') !== `Bearer ${token}`) {
+    sendJson(res, 401, { ok: false, error: 'unauthorized' })
+    return
   }
 
   switch (route) {
-    case 'GET /status': {
+    case `GET ${DaemonRoutes.status}`: {
       sendJson(res, 200, {
         ok: true,
         running: polling && !expired,
@@ -94,7 +82,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
       return
     }
 
-    case 'POST /send-text': {
+    case `POST ${DaemonRoutes.sendText}`: {
       const body = await readBody<{ userId?: string; text?: string }>(req)
       if (!client || expired) { sendJson(res, 409, { ok: false, error: 'daemon 未登录微信' }); return }
       if (!body?.userId || !body.text) { sendJson(res, 400, { ok: false, error: 'userId/text required' }); return }
@@ -107,13 +95,13 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
       return
     }
 
-    case 'POST /send-file':
-    case 'POST /send-image': {
+    case `POST ${DaemonRoutes.sendFile}`:
+    case `POST ${DaemonRoutes.sendImage}`: {
       const body = await readBody<{ userId?: string; filePath?: string; fileName?: string }>(req)
       if (!client || expired) { sendJson(res, 409, { ok: false, error: 'daemon 未登录微信' }); return }
       if (!body?.userId || !body.filePath) { sendJson(res, 400, { ok: false, error: 'userId/filePath required' }); return }
       try {
-        if (route.endsWith('image')) await client.sendImage(body.userId, body.filePath)
+        if (route.endsWith(DaemonRoutes.sendImage)) await client.sendImage(body.userId, body.filePath)
         else await client.sendFile(body.userId, body.filePath, body.fileName)
         sendJson(res, 200, { ok: true })
       } catch (err) {
@@ -122,7 +110,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
       return
     }
 
-    case 'POST /reload': {
+    case `POST ${DaemonRoutes.reload}`: {
       // 登录成功/凭证更新后重建客户端
       const creds = await loadCredentials()
       if (!creds) { sendJson(res, 409, { ok: false, error: '无本地凭证' }); return }
@@ -134,7 +122,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
       return
     }
 
-    case 'POST /shutdown': {
+    case `POST ${DaemonRoutes.shutdown}`: {
       sendJson(res, 200, { ok: true })
       void shutdown()
       return
@@ -178,7 +166,7 @@ async function pollLoop(): Promise<void> {
         await releaseLock(DAEMON_SESSION).catch(() => {})
         return
       }
-      debugLog(`[daemon] 輪询失败: ${error}`)
+      debugLog(`[daemon] 轮询失败: ${error}`)
       await new Promise(r => setTimeout(r, retryDelay))
       retryDelay = Math.min(retryDelay * 2, 10_000)
     }
