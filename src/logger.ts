@@ -8,7 +8,7 @@ import * as path from 'node:path'
 
 const DEBUG = process.env.PI_WECHAT_DEBUG === '1'
 const DEBUG_LOG_FILE = process.env.PI_WECHAT_DEBUG_FILE
-  ?? path.join(os.homedir(), '.pi', 'agent', 'wechat-assistant', 'debug.log')
+  ?? path.join(os.homedir(), '.pi', 'agent', 'wechat-notify', 'debug.log')
 
 export function isDebugEnabled(): boolean {
   return DEBUG

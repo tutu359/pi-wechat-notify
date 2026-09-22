@@ -59,14 +59,14 @@ export default function wechatAssistant(pi: ExtensionAPI) {
       if (!isDebugEnabled()) return
     }
     const printer = level === 'error' ? console.error : console.log
-    printer(`[wechat-assistant/${level}] ${message}`)
+    printer(`[wechat-notify/${level}] ${message}`)
   }
 
   function updateStatusBar(): void {
     if (!latestCtx?.hasUI) return
     if (!loggedIn) { latestCtx.ui.setStatus('wechat', ''); return }
     const hasDaemon = state?.targetUserId != null
-    latestCtx.ui.setStatus('wechat', hasDaemon ? '[微信 ✅ 通知可用]' : '[微信 ⏸ 连接中]')
+    latestCtx.ui.setStatus('wechat', hasDaemon ? '[wechat: on]' : '[wechat: ...]')
   }
 
   // ============================================================================

@@ -10,7 +10,7 @@ import type { Credentials } from './types.js'
 
 // --- 路径 ---
 
-const STATE_DIR = path.join(os.homedir(), '.pi', 'agent', 'wechat-assistant')
+const STATE_DIR = path.join(os.homedir(), '.pi', 'agent', 'wechat-notify')
 const CREDS_FILE = path.join(STATE_DIR, 'credentials.json')
 const LOCK_FILE = path.join(STATE_DIR, 'session.lock')
 const CONTEXT_TOKENS_FILE = path.join(STATE_DIR, 'context-tokens.json')
