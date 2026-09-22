@@ -22,12 +22,12 @@ export function sessionDisplayName(sessionName: string | null | undefined, cwd: 
 }
 
 /**
- * 给通知内容加前缀：【名字】内容
+ * 给通知加前缀：前缀独占一行，内容另起一行。
  * 内容为空时只返回前缀本身；前缀关闭时原样返回。
  */
 export function withPrefix(name: string, text: string, enabled = true): string {
   if (!enabled) return text
-  return `【${name}】${text}`
+  return `【${name}】\n${text}`
 }
 
 /**

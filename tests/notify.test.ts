@@ -19,7 +19,7 @@ describe('sessionDisplayName', () => {
 
 describe('withPrefix', () => {
   it('加前缀', () => {
-    expect(withPrefix('TestCC', 'hello')).toBe('【TestCC】hello')
+    expect(withPrefix('TestCC', 'hello')).toBe('【TestCC】\nhello')
   })
   it('可关闭前缀', () => {
     expect(withPrefix('TestCC', 'hello', false)).toBe('hello')
