@@ -97,12 +97,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
 
     case `POST ${DaemonRoutes.sendFile}`:
     case `POST ${DaemonRoutes.sendImage}`: {
-      const body = await readBody<{ userId?: string; filePath?: string; fileName?: string }>(req)
+      const body = await readBody<{ userId?: string; imagePath?: string }>(req)
       if (!client || expired) { sendJson(res, 409, { ok: false, error: 'daemon 未登录微信' }); return }
-      if (!body?.userId || !body.filePath) { sendJson(res, 400, { ok: false, error: 'userId/filePath required' }); return }
+      if (!body?.userId || !body.imagePath) { sendJson(res, 400, { ok: false, error: 'userId/imagePath required' }); return }
       try {
-        if (route.endsWith(DaemonRoutes.sendImage)) await client.sendImage(body.userId, body.filePath)
-        else await client.sendFile(body.userId, body.filePath, body.fileName)
+        await client.sendImage(body.userId, body.imagePath)
         sendJson(res, 200, { ok: true })
       } catch (err) {
         sendJson(res, 500, { ok: false, error: String(err) })
