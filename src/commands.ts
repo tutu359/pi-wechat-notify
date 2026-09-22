@@ -1,70 +1,71 @@
 // ============================================================================
-// TUI 命令处理（/wechat login/start/stop/status/...）
+// TUI 命令处理（/wechat login | logout | status）
 // ============================================================================
 
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from '@mariozechner/pi-coding-agent'
-import { debugLog, isDebugEnabled } from './logger.js'
 import {
-  acquireLock,
   clearCredentials,
   clearContextTokens,
   clearTransportState,
   getCredentialsPath,
   getQrCode,
-  loadConfig,
   loadCredentials,
   pollQrStatus,
-  releaseLock,
-  saveConfig,
-  saveCredentials,
 } from './auth.js'
-import { WeixinClient, SessionExpiredError } from './client.js'
-import { MessageQueue, getImageBatchWaitMs, getImageMaxBytes } from './queue.js'
-import { renderQrCode, formatError } from './utils.js'
+import { renderQrCode } from './utils.js'
+import { daemonReload } from './daemon-client.js'
 import { QR_POLL_INTERVAL_MS, QR_MAX_REFRESH } from './constants.js'
 
 type Ctx = ExtensionContext | ExtensionCommandContext
 
-export interface CommandDeps {
-  pi: ExtensionAPI
-  getClient: () => WeixinClient | null
-  setClient: (c: WeixinClient | null) => void
-  loadClient: () => Promise<WeixinClient | null>
-  isRunning: () => boolean
-  setRunning: (v: boolean) => void
-  getPollAbort: () => AbortController | null
-  setPollAbort: (c: AbortController | null) => void
-  queue: MessageQueue
-  lock: () => Promise<{ success: boolean; message: string }>
-  unlock: () => Promise<void>
-  stopBridge: (options?: { releaseLock?: boolean }) => Promise<void>
-  pollMessages: (client: WeixinClient) => Promise<void>
-  latestCtx: () => Ctx | null
-  setLatestCtx: (ctx: Ctx) => void
-  updateStatusBar: () => void
-  notify: (message: string, level: 'info' | 'warning' | 'error') => void
-  disposeClient: () => Promise<void>
+export interface WechatSessionState {
+  displayName: string
+  targetUserId: string | null
 }
 
+export interface CommandDeps {
+  pi: ExtensionAPI
+  getCtx: () => Ctx | null
+  setCtx: (ctx: Ctx) => void
+  isLoggedIn: () => boolean
+  setLoggedIn: (v: boolean) => void
+  getState: () => WechatSessionState | null
+  setState: (s: WechatSessionState | null) => void
+  notify: (message: string, level: 'info' | 'warning' | 'error') => void
+  registerTools: () => void
+  daemonShutdown: () => Promise<void>
+  probeDaemon: () => Promise<{ status: { userId: string | null; accountId: string | null; running: boolean; expired: boolean; pid: number | null; port: number | null } } | null>
+  formatError: (err: unknown) => string
+}
+
+// --- 登录 ---
+
 async function cmdLogin(args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
-  deps.setLatestCtx(ctx)
+  deps.setCtx(ctx)
   const force = args.split(/\s+/).includes('--force')
+
   if (!force) {
-    const cached = await deps.loadClient()
-    if (cached) {
-      deps.notify(`已加载本地微信凭证: ${getCredentialsPath()}`, 'info')
+    const creds = await loadCredentials()
+    if (creds) {
+      // 已有凭证：确保 daemon 可用并注册工具
+      deps.setLoggedIn(true)
+      deps.setState({ displayName: deps.getState()?.displayName ?? '(unknown)', targetUserId: creds.userId })
+      deps.registerTools()
+      try {
+        await daemonReload()
+        deps.notify('微信凭证已存在，daemon 已连接 ✅（--force 可重新扫码）', 'info')
+      } catch (err) {
+        deps.notify(`daemon 连接失败: ${deps.formatError(err)}`, 'error')
+      }
       return
     }
   }
-  if (deps.isRunning()) await deps.stopBridge({ releaseLock: true })
 
-  // 强制重新登录时清除旧身份的会话和长轮询状态。
   if (force) {
     await Promise.all([clearContextTokens(), clearTransportState()])
   }
 
   let currentBaseUrl: string | undefined
-
   try {
     const qr = await getQrCode(currentBaseUrl)
     const qrText = await renderQrCode(qr.url)
@@ -79,27 +80,31 @@ async function cmdLogin(args: string, ctx: Ctx, deps: CommandDeps): Promise<void
 
       if (result.redirectHost) {
         currentBaseUrl = `https://${result.redirectHost}`
-        debugLog(`重定向到: ${currentBaseUrl}`)
       }
-
       if (result.status === lastStatus) continue
       lastStatus = result.status
 
       if (result.status === 'scaned') { deps.notify('已扫码，请在手机上确认登录', 'info'); continue }
 
       if (result.status === 'confirmed' && result.credentials) {
+        const { saveCredentials } = await import('./auth.js')
         await saveCredentials(result.credentials)
-        const newClient = await WeixinClient.create(result.credentials)
-        deps.setClient(newClient)
-        deps.notify('微信登录成功 ✅', 'info')
-        deps.updateStatusBar()
+        deps.setLoggedIn(true)
+        deps.setState({ displayName: deps.getState()?.displayName ?? '(unknown)', targetUserId: result.credentials.userId })
+        deps.registerTools()
+        try {
+          await daemonReload()
+        } catch {
+          // daemon 首次拉起由下次发送时 ensureDaemon 兜底
+        }
+        deps.notify('微信登录成功 ✅ 通知通道已就绪', 'info')
         return
       }
 
       if (result.status === 'expired') {
         refreshCount++
         if (refreshCount >= QR_MAX_REFRESH) {
-          deps.notify(`二维码多次过期，请重新执行 /wechat login`, 'error')
+          deps.notify('二维码多次过期，请重新执行 /wechat login', 'error')
           return
         }
         deps.notify(`二维码已过期，正在刷新 (${refreshCount}/${QR_MAX_REFRESH})...`, 'info')
@@ -113,145 +118,59 @@ async function cmdLogin(args: string, ctx: Ctx, deps: CommandDeps): Promise<void
       if (result.status === 'scaned_but_redirect') continue
     }
   } catch (error) {
-    deps.notify(`微信登录失败: ${formatError(error)}`, 'error')
+    deps.notify(`微信登录失败: ${deps.formatError(error)}`, 'error')
   }
 }
 
-async function cmdStart(_args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
-  deps.setLatestCtx(ctx)
-  const activeClient = await deps.loadClient()
-  if (!activeClient) { deps.notify('未找到微信凭证，请先执行 /wechat login', 'error'); return }
-  if (deps.isRunning()) { deps.notify('微信桥接已经在运行', 'info'); return }
-  const lockResult = await deps.lock()
-  if (!lockResult.success) { deps.notify(lockResult.message, 'error'); return }
-  deps.setRunning(true)
-  const pollAbort = new AbortController()
-  deps.setPollAbort(pollAbort)
-  deps.notify('微信桥接已启动 📱', 'info')
-  deps.updateStatusBar()
-  void deps.pollMessages(activeClient).finally(() => {
-    if (deps.getPollAbort()?.signal.aborted) deps.setPollAbort(null)
-  })
-}
-
-async function cmdStop(_args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
-  deps.setLatestCtx(ctx)
-  await deps.stopBridge({ releaseLock: true })
-  deps.notify('微信桥接已停止', 'info')
-  deps.updateStatusBar()
-}
-
-async function cmdStatus(_args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
-  deps.setLatestCtx(ctx)
-  const activeClient = deps.getClient()
-  const config = await loadConfig()
-  const lines = [
-    `运行状态: ${deps.isRunning() ? '✅ 运行中' : '⏸ 已停止'}`,
-    `凭证状态: ${activeClient ? '✅ 已登录' : '❌ 未登录'}`,
-    `账号 ID: ${activeClient?.accountId ?? '-'}`,
-    `用户 ID: ${activeClient?.userId ?? '-'}`,
-    `排队消息: ${deps.queue.pending}`,
-    `凭证路径: ${getCredentialsPath()}`,
-    `自动启动: ${config.autoStart ? '已开启' : '已关闭'}`,
-    `图片合并等待: ${getImageBatchWaitMs()}ms`,
-    `图片上限: ${Math.round(getImageMaxBytes() / 1024 / 1024)}MB`,
-  ]
-  deps.notify(lines.join('\n'), 'info')
-}
+// --- 登出 ---
 
 async function cmdLogout(_args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
-  deps.setLatestCtx(ctx)
-  await deps.stopBridge({ releaseLock: true })
-  await deps.disposeClient()
+  deps.setCtx(ctx)
+  try { await deps.daemonShutdown() } catch { /* daemon 可能本来就没活着 */ }
   await Promise.all([
     clearCredentials(),
     clearContextTokens(),
     clearTransportState(),
   ])
-  deps.setClient(null)
-  deps.queue.lastWechatUser = null
-  deps.notify(`已清除微信凭证: ${getCredentialsPath()}`, 'info')
-  deps.updateStatusBar()
+  deps.setLoggedIn(false)
+  deps.setState(null)
+  deps.notify(`已清除微信凭证并关停 daemon: ${getCredentialsPath()}`, 'info')
 }
 
-async function cmdConfig(args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
-  deps.setLatestCtx(ctx)
-  const [key, value] = args.trim().split(/\s+/)
-  const config = await loadConfig()
-  if (!key) {
-    deps.notify([
-      `自动启动: ${config.autoStart ? '已开启' : '已关闭'}`,
-      `微信 /tools: ${config.allowRemoteTools ? '已开启' : '已关闭（/wechat remotetools on 开启）'}`,
-      `图片合并等待: ${getImageBatchWaitMs()}ms`,
-      `图片上限: ${Math.round(getImageMaxBytes() / 1024 / 1024)}MB`,
-      '', '用法:', '/wechat config image-wait 8000', '/wechat config image-max 50',
-    ].join('\n'), 'info')
-    return
-  }
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric) || numeric <= 0) { deps.notify('配置值必须是正数', 'error'); return }
-  if (key === 'image-wait') {
-    config.imageBatchWaitMs = Math.min(Math.max(Math.round(numeric), 0), 60_000)
-  } else if (key === 'image-max') {
-    config.imageMaxBytes = Math.round(numeric * 1024 * 1024)
-  } else {
-    deps.notify('未知配置项。支持: image-wait, image-max', 'error')
-    return
-  }
-  await saveConfig(config)
-  deps.notify('微信桥接配置已更新 ✅', 'info')
-}
+// --- 状态 ---
 
-async function cmdAutostart(_args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
-  deps.setLatestCtx(ctx)
-  const config = await loadConfig()
-  config.autoStart = !config.autoStart
-  await saveConfig(config)
-  deps.notify(`自动启动已${config.autoStart ? '开启 ✅' : '关闭 ❌'}`, 'info')
-}
-
-async function cmdRemoteTools(args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
-  deps.setLatestCtx(ctx)
-  const config = await loadConfig()
-  const arg = args.trim().toLowerCase()
-  if (arg === 'on' || arg === 'off') {
-    config.allowRemoteTools = arg === 'on'
-  } else if (arg === '') {
-    config.allowRemoteTools = !config.allowRemoteTools
-  } else {
-    deps.notify('用法: /wechat remotetools on|off（无参数则切换）', 'error')
-    return
-  }
-  await saveConfig(config)
-  deps.notify(`微信端 /tools 已${config.allowRemoteTools ? '开启 ✅（注意：微信消息将可修改本机工具权限）' : '关闭 ❌'}`, 'info')
+async function cmdStatus(_args: string, ctx: Ctx, deps: CommandDeps): Promise<void> {
+  deps.setCtx(ctx)
+  const creds = await loadCredentials()
+  const probed = await deps.probeDaemon()
+  const state = deps.getState()
+  const lines = [
+    `凭证状态: ${creds ? '✅ 已登录' : '❌ 未登录（/wechat login 扫码）'}`,
+    `daemon: ${probed ? `✅ 运行中 (PID ${probed.status.pid}, 端口 ${probed.status.port ?? '-'})` : '⏸ 未运行（发送时自动拉起）'}`,
+    probed ? `daemon 轮询: ${probed.status.running ? '正常' : probed.status.expired ? '❌ session 过期，请重新 login' : '未运行'}` : '',
+    probed ? `绑定账号: ${probed.status.accountId ?? '-'} (${probed.status.userId ?? '-'})` : '',
+    `本会话前缀: ${state ? `【${state.displayName}】` : '-（未连接）'}`,
+    `凭证路径: ${getCredentialsPath()}`,
+  ].filter(Boolean)
+  deps.notify(lines.join('\n'), 'info')
 }
 
 export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
   pi.registerCommand('wechat', {
-    description: '微信桥接管理：login | start | stop | status | config | logout | autostart | remotetools',
+    description: '微信通知：login | logout | status',
     handler: async (args, ctx) => {
       const [sub, ...rest] = args.trim().split(/\s+/)
       const restArgs = rest.join(' ')
       const help = [
-        '/wechat login             扫码登录',
-        '/wechat login --force     强制重新扫码',
-        '/wechat start             启动桥接',
-        '/wechat stop              停止桥接',
-        '/wechat status            查看状态',
-        '/wechat config            查看/设置配置',
-        '/wechat logout            清除凭证并停止',
-        '/wechat autostart         开关自动启动',
-        '/wechat remotetools       开关微信端 /tools 命令（默认禁用）',
+        '/wechat login          扫码登录（已有凭证则重连 daemon）',
+        '/wechat login --force  强制重新扫码',
+        '/wechat logout         清除凭证并关停 daemon',
+        '/wechat status         查看状态',
       ].join('\n')
       switch (sub) {
         case 'login': return cmdLogin(restArgs, ctx, deps)
-        case 'start': return cmdStart(restArgs, ctx, deps)
-        case 'stop': return cmdStop(restArgs, ctx, deps)
-        case 'status': return cmdStatus(restArgs, ctx, deps)
-        case 'config': return cmdConfig(restArgs, ctx, deps)
         case 'logout': return cmdLogout(restArgs, ctx, deps)
-        case 'autostart': return cmdAutostart(restArgs, ctx, deps)
-        case 'remotetools': return cmdRemoteTools(restArgs, ctx, deps)
+        case 'status': return cmdStatus(restArgs, ctx, deps)
         default: deps.notify(`未知子命令: ${sub || '(无)'}\n\n${help}`, 'warning')
       }
     },

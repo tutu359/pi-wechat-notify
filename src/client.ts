@@ -98,8 +98,12 @@ async function uploadAndBuildItem(
 
   let uploadParam = uploadResp.upload_param
   if (!uploadParam && uploadResp.upload_full_url) {
-    const url = new URL(uploadResp.upload_full_url)
-    uploadParam = url.searchParams.get('encrypted_query_param') ?? undefined
+    try {
+      const url = new URL(uploadResp.upload_full_url)
+      uploadParam = url.searchParams.get('encrypted_query_param') ?? undefined
+    } catch {
+      throw new Error(`Invalid upload_full_url: ${uploadResp.upload_full_url}`)
+    }
   }
   if (!uploadParam) throw new Error('Failed to get upload URL')
 
@@ -311,7 +315,6 @@ export class WeixinClient {
     }
   }
 
-  private _persistTimer: ReturnType<typeof setTimeout> | null = null
 
   private _schedulePersist(): void {
     if (this._disposed) return

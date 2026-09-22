@@ -23,11 +23,13 @@ export function extractTextFromMessageContent(content: unknown): string | null {
   if (typeof content === 'string') return content.trim() || null
   if (!Array.isArray(content)) return null
   const text = content
-    .filter((part): part is { type: 'text'; text: string } =>
-      typeof part === 'object' && part !== null && (part as { type?: string }).type === 'text',
-    )
-    .map((part) => part.text.trim())
-    .filter(Boolean)
+    .flatMap((item) => {
+      if (typeof item === 'string') return [item]
+      if (item && typeof item === 'object' && 'text' in item && typeof (item as { text: unknown }).text === 'string') {
+        return [(item as { text: string }).text]
+      }
+      return []
+    })
     .join('\n')
     .trim()
   return text || null

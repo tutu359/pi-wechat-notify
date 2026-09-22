@@ -62,7 +62,12 @@ function buildHeaders(token: string): Record<string, string> {
 
 async function parseJsonResponse<T>(response: Response, label: string): Promise<T> {
   const text = await response.text()
-  const payload = text ? (JSON.parse(text) as T) : ({} as T)
+  let payload: T
+  try {
+    payload = text ? (JSON.parse(text) as T) : ({} as T)
+  } catch {
+    throw new ApiError(`${label} returned invalid JSON`, { status: response.status })
+  }
 
   if (!response.ok) {
     const body = payload as { errmsg?: string; errcode?: number } | null

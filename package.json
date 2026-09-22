@@ -2,7 +2,7 @@
   "name": "pi-wechat-assistant",
   "version": "0.3.1",
   "type": "module",
-  "description": "微信作为 pi TUI 的移动端分身 — 通过微信远程与 pi 交互",
+  "description": "微信通知广播站 — 多个 pi 会话共享的常驻微信通知通道（单向）",
   "main": "index.ts",
   "license": "MIT",
   "author": "sj",
@@ -62,7 +62,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@mariozechner/pi-coding-agent": "*",
-    "@types/node": "^22.10.5",
+    "@types/node": "^22.20.4",
     "@types/qrcode-terminal": "^0.12.2",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
