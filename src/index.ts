@@ -66,7 +66,9 @@ export default function wechatAssistant(pi: ExtensionAPI) {
     if (!latestCtx?.hasUI) return
     if (!loggedIn) { latestCtx.ui.setStatus('wechat', ''); return }
     const hasDaemon = state?.targetUserId != null
-    latestCtx.ui.setStatus('wechat', hasDaemon ? '[wechat: on]' : '[wechat: ...]')
+    // 前缀用 Nerd Font 气泡字形；不要以方括号开头，否则会被 pi-powerline-footer
+    // 判定为“通知类状态”而独占编辑器上方一行。
+    latestCtx.ui.setStatus('wechat', hasDaemon ? '\uf075 wechat: on' : '[wechat: ...]')
   }
 
   // ============================================================================
