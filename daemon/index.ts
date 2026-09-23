@@ -21,7 +21,11 @@ import { debugLog } from '../src/logger.js'
 import { DAEMON_PORT, DAEMON_FILE, DaemonRoutes, type DaemonInfo } from '../src/daemon-shared.js'
 
 const PORT = Number(process.env.PI_WECHAT_DAEMON_PORT ?? DAEMON_PORT)
-const DAEMON_SESSION = 'daemon'
+
+// 每个实例一个唯一 sessionId：确保 acquireLock 能把「另一个 daemon 实例」认定为
+// 外来占用者并拒绝启动。用常量 sessionId 会让第二个实例被当成"自己人"放行，
+// 从而覆盖 daemon.json / 抢占锁。
+const DAEMON_SESSION = `daemon-${process.pid}-${Date.now().toString(36)}`
 
 // --- 共享状态 ---
 
@@ -31,11 +35,9 @@ let polling = false       // 轮询循环是否存活
 
 // --- daemon.json ---
 
-async function writeDaemonInfo(): Promise<string> {
-  const token = randomUUID()
+async function writeDaemonInfo(token: string): Promise<void> {
   const info: DaemonInfo = { port: PORT, token, pid: process.pid, startedAt: new Date().toISOString() }
   await fs.writeFile(DAEMON_FILE, JSON.stringify(info, null, 2), { mode: 0o600 })
-  return token
 }
 
 async function clearDaemonInfo(): Promise<void> {
@@ -198,7 +200,9 @@ async function main(): Promise<void> {
     process.exit(3)
   }
 
-  const token = await writeDaemonInfo()
+  // token 先生成、后写入：只有端口监听成功后才落盘 daemon.json，
+  // 避免「文件写成功但端口绑定失败」留下一份指向死进程的假状态。
+  const token = randomUUID()
 
   client = await WeixinClient.create(creds)
   startPolling()
@@ -209,8 +213,24 @@ async function main(): Promise<void> {
       try { sendJson(res, 500, { ok: false, error: String(err) }) } catch { /* ignore */ }
     })
   })
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    // 端口被占说明已有 daemon 在运行：绝不改状态文件，直接退出。
+    const hint = err.code === 'EADDRINUSE'
+      ? `端口 ${PORT} 已被占用，已有 daemon 在运行`
+      : `监听失败: ${err.message}`
+    console.error(`[pi-wechat-daemon] ${hint}`)
+    void releaseLock(DAEMON_SESSION).finally(() => process.exit(4))
+  })
+
   server.listen(PORT, '127.0.0.1', () => {
-    debugLog(`[pi-wechat-daemon] 已启动: http://127.0.0.1:${PORT} (userId=${client?.userId})`)
+    void writeDaemonInfo(token)
+      .then(() => debugLog(`[pi-wechat-daemon] 已启动: http://127.0.0.1:${PORT} (pid=${process.pid}, userId=${client?.userId})`))
+      .catch(err => {
+        // 状态文件写失败则无法被发现，视为启动失败
+        console.error(`[pi-wechat-daemon] 写入 daemon.json 失败: ${err}`)
+        void shutdown()
+      })
   })
 }
 

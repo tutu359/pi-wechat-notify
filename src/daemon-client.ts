@@ -105,6 +105,10 @@ export async function ensureDaemon(): Promise<DaemonInfo> {
   let probed = await probeDaemon()
   if (probed) return probed.info
 
+  // 探活失败：清理陈旧/失配状态与僵尸 daemon，避免「每次发送都拉一个新 daemon、
+  // 新 daemon 又覆盖 daemon.json」的钝化循环。
+  await recoverStaleState()
+
   // 拉起 daemon（detached，随 pi 退出继续常驻）
   debugLog('[daemon-client] daemon 不可达，尝试拉起...')
   const daemonEntry = path.join(PKG_ROOT, 'daemon', 'index.ts')
@@ -116,14 +120,84 @@ export async function ensureDaemon(): Promise<DaemonInfo> {
   })
   child.unref()
 
+  let exitInfo: { code: number | null; signal: string | null } | null = null
+  child.once('exit', (code, signal) => { exitInfo = { code, signal } })
+
   for (let i = 0; i < SPAWN_WAIT_ROUNDS; i++) {
     await new Promise(r => setTimeout(r, SPAWN_WAIT_INTERVAL_MS))
     probed = await probeDaemon()
     if (probed) return probed.info
+    if (exitInfo) {
+      const { code, signal } = exitInfo as { code: number | null; signal: string | null }
+      throw new DaemonSendError(
+        `daemon 启动即退出 (code=${code ?? 'null'}${signal ? `, signal=${signal}` : ''})。` +
+        '常见原因：无本地凭证、端口被其他进程占用。请先执行 /wechat status 检查。',
+      )
+    }
   }
   throw new DaemonSendError(
     `daemon 拉起失败（等待 ${Math.round((SPAWN_WAIT_ROUNDS * SPAWN_WAIT_INTERVAL_MS) / 1000)}s 无响应）。请检查凭证与日志。`,
   )
+}
+
+// --- 陈旧状态恢复 ---
+
+async function removeDaemonFile(): Promise<void> {
+  try { await fs.unlink(DAEMON_FILE) } catch { /* ignore */ }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** 找出命令行里带本扩展 daemon 入口的进程（含已被覆盖状态、我们已无法控制的实例） */
+async function findDaemonPids(): Promise<number[]> {
+  const { execFile } = await import('node:child_process')
+  return new Promise(resolve => {
+    execFile('ps', ['-ax', '-o', 'pid=,command='], (err, stdout) => {
+      if (err || !stdout) { resolve([]); return }
+      const marker = path.join(PKG_ROOT, 'daemon')
+      const pids = stdout.split('\n')
+        .filter(line => line.includes(marker) && line.includes('index.ts'))
+        .map(line => Number(line.trim().split(/\s+/)[0]))
+        .filter(pid => Number.isFinite(pid) && pid > 0 && pid !== process.pid)
+      resolve(pids)
+    })
+  })
+}
+
+/**
+ * 探活失败时清理现场：
+ *   - daemon.json 指向已死进程 → 删掉该文件
+ *   - 仍有 daemon 进程活着（可能是 token 被覆盖后我们无法再对话的僵尸实例）→ 先终止它
+ */
+async function recoverStaleState(): Promise<void> {
+  const info = await readDaemonInfo()
+  if (info && !isProcessAlive(info.pid)) {
+    debugLog(`[daemon-client] 清理失效 daemon.json (pid ${info.pid} 已退出)`)
+    await removeDaemonFile()
+  }
+
+  const pids = await findDaemonPids()
+  if (pids.length > 0) {
+    debugLog(`[daemon-client] 发现失联 daemon 进程，终止: ${pids.join(', ')}`)
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGTERM') } catch { /* 已退出 */ }
+    }
+    // 给它们一点时间释放端口
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 200))
+      if (pids.every(pid => !isProcessAlive(pid))) break
+    }
+    // 僵尸实例退出时也会清自己的 daemon.json；重新确认一次
+    const after = await readDaemonInfo()
+    if (after && !isProcessAlive(after.pid)) await removeDaemonFile()
+  }
 }
 
 // --- 出站接口（失败自动重发一次，再失败才抛错） ---
