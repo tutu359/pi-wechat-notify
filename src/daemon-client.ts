@@ -17,6 +17,8 @@ import { DAEMON_PORT, DAEMON_FILE, DaemonRoutes, type DaemonInfo } from './daemo
 
 const SPAWN_WAIT_ROUNDS = 75
 const SPAWN_WAIT_INTERVAL_MS = 200
+/** 可达但尚无 context token 时的宽限等待：等 daemon 的预热拉取/消息刷新完成 */
+const TOKEN_GRACE_MS = 8_000
 
 export interface DaemonStatus {
   running: boolean
@@ -144,10 +146,34 @@ export async function probeDaemon(): Promise<{ info: DaemonInfo; status: DaemonS
   }
 }
 
+/**
+ * 等到 daemon 既可达、又已持有 context token（或宽限期耗尽）。
+ *
+ * context token 是发送的前提：「端口已通」不等于「可以发」；
+ * 这里给预热拉取/入站消息刷新一点时间，避免第一次发送踩空。
+ */
+async function waitForReady(
+  budgetMs: number,
+): Promise<{ info: DaemonInfo; status: DaemonStatus } | null> {
+  const deadline = Date.now() + budgetMs
+  let last = await probeDaemon()
+  while (last && !last.status.hasContextToken && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, SPAWN_WAIT_INTERVAL_MS))
+    last = await probeDaemon()
+    if (!last) return null
+  }
+  if (last && !last.status.hasContextToken) {
+    debugLog('[daemon-client] 宽限期内仍未拿到 context token，继续发送并等待服务端错误')
+  }
+  return last
+}
+
 /** 确保 daemon 存活并已登录；需要时自动拉起。失败抛 DaemonSendError。 */
 export async function ensureDaemon(): Promise<DaemonInfo> {
-  let probed = await probeDaemon()
-  if (probed) return probed.info
+  const existing = await probeDaemon()
+  if (existing) {
+    return (await waitForReady(TOKEN_GRACE_MS))?.info ?? existing.info
+  }
 
   // 探活失败：清理陈旧/失配状态与僵尸 daemon，避免「每次发送都拉一个新 daemon、
   // 新 daemon 又覆盖 daemon.json」的钝化循环。
@@ -169,8 +195,11 @@ export async function ensureDaemon(): Promise<DaemonInfo> {
 
   for (let i = 0; i < SPAWN_WAIT_ROUNDS; i++) {
     await new Promise(r => setTimeout(r, SPAWN_WAIT_INTERVAL_MS))
-    probed = await probeDaemon()
-    if (probed) return probed.info
+    const probed = await probeDaemon()
+    if (probed) {
+      // 可达后再给 token 一点宽限期（预热拉取可能仍在途）
+      return (await waitForReady(TOKEN_GRACE_MS))?.info ?? probed.info
+    }
     if (exitInfo) {
       const { code, signal } = exitInfo as { code: number | null; signal: string | null }
       throw new DaemonSendError(

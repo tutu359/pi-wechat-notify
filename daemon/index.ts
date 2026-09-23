@@ -19,8 +19,12 @@ import { acquireLock, releaseLock, loadCredentials } from '../src/auth.js'
 import { isAuthorizedWeChatSender } from '../src/security.js'
 import { debugLog } from '../src/logger.js'
 import { DAEMON_PORT, DAEMON_FILE, DaemonRoutes, type DaemonInfo } from '../src/daemon-shared.js'
+import type { IncomingMessage as WeChatMessage } from '../src/types.js'
 
 const PORT = Number(process.env.PI_WECHAT_DAEMON_PORT ?? DAEMON_PORT)
+
+/** 启动预热拉取的超时：有积压消息时服务端会立即返回，无需等长轮询超时 */
+const PRIME_TIMEOUT_MS = 3_000
 
 // 每个实例一个唯一 sessionId：确保 acquireLock 能把「另一个 daemon 实例」认定为
 // 外来占用者并拒绝启动。用常量 sessionId 会让第二个实例被当成"自己人"放行，
@@ -164,6 +168,32 @@ function startPolling(): void {
   void pollLoop()
 }
 
+/** 入站消息统一处理：拉取但丢弃（仅日志留痕）。context token 已由 client 内部刷新。 */
+function discardIncoming(messages: WeChatMessage[], userId: string): void {
+  for (const m of messages) {
+    if (!isAuthorizedWeChatSender(m.raw.from_user_id, userId)) continue
+    debugLog(`[daemon] 收到来自 ${m.userId} 的消息（已丢弃）: ${(m.text ?? '').slice(0, 50)}`)
+  }
+}
+
+/**
+ * 启动时先立刻拉一次：把服务器上积压的入站消息消费掉。
+ *
+ * 为什么不依赖后面的长轮询：入站消息里的 context_token 是发送的必要凭证，
+ * 而「端口已通」并不代表「己拉到 token」。先拉一次再开端口，
+ * 可以让扩展在 daemon 可达时就已经拥有最新 token（消除第一次发送踩空的竞态）。
+ */
+async function primeInbound(activeClient: WeixinClient): Promise<void> {
+  try {
+    const messages = await activeClient.getUpdates(AbortSignal.timeout(PRIME_TIMEOUT_MS))
+    discardIncoming(messages, activeClient.userId)
+    debugLog(`[daemon] 启动预热拉取完成: ${messages.length} 条`)
+  } catch (error) {
+    // 超时/失败不致命：后面的长轮询会接管；只是可能晚几秒拿到 token
+    debugLog(`[daemon] 启动预热拉取未完成（忽略）: ${error}`)
+  }
+}
+
 async function pollLoop(): Promise<void> {
   let retryDelay = 1_000
   while (polling && client && !expired) {
@@ -171,11 +201,7 @@ async function pollLoop(): Promise<void> {
     try {
       const messages = await activeClient.getUpdates()
       retryDelay = 1_000
-      for (const m of messages) {
-        // 拉取但丢弃：仅日志留痕；未授权来源静默跳过
-        if (!isAuthorizedWeChatSender(m.raw.from_user_id, activeClient.userId)) continue
-        debugLog(`[daemon] 收到来自 ${m.userId} 的消息（已丢弃）: ${(m.text ?? '').slice(0, 50)}`)
-      }
+      discardIncoming(messages, activeClient.userId)
     } catch (error) {
       if (error instanceof SessionExpiredError) {
         debugLog('[daemon] 微信 Session 已过期，等待 /reload')
@@ -222,6 +248,8 @@ async function main(): Promise<void> {
   const token = randomUUID()
 
   client = await WeixinClient.create(creds)
+  // 先预热拉取，再开端口：保证 daemon「可达」时就已经尽力拿到最新 context token
+  await primeInbound(client)
   startPolling()
 
   const server = createServer((req, res) => {
