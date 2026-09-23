@@ -25,6 +25,10 @@ export interface DaemonStatus {
   accountId: string | null
   pid: number | null
   port: number | null
+  /** 发送所需的 context token 是否已缓存 */
+  hasContextToken: boolean
+  /** token 年龄（毫秒）；null 表示仅从磁盘恢复、年龄未知 */
+  contextTokenAgeMs: number | null
 }
 
 export class DaemonSendError extends Error {}
@@ -117,6 +121,8 @@ export async function probeDaemon(): Promise<{ info: DaemonInfo; status: DaemonS
       userId: string | null
       accountId: string | null
       pid: number
+      hasContextToken?: boolean
+      contextTokenAgeMs?: number | null
     }>(info, DaemonRoutes.status, undefined, 3_000)
     return {
       info,
@@ -127,6 +133,8 @@ export async function probeDaemon(): Promise<{ info: DaemonInfo; status: DaemonS
         accountId: status.accountId,
         pid: status.pid,
         port: info.port,
+        hasContextToken: status.hasContextToken ?? false,
+        contextTokenAgeMs: status.contextTokenAgeMs ?? null,
       },
     }
   } catch (err) {

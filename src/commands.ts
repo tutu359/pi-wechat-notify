@@ -35,7 +35,7 @@ export interface CommandDeps {
   notify: (message: string, level: 'info' | 'warning' | 'error') => void
   registerTools: () => void
   daemonShutdown: () => Promise<void>
-  probeDaemon: () => Promise<{ status: { userId: string | null; accountId: string | null; running: boolean; expired: boolean; pid: number | null; port: number | null } } | null>
+  probeDaemon: () => Promise<{ status: { userId: string | null; accountId: string | null; running: boolean; expired: boolean; pid: number | null; port: number | null; hasContextToken: boolean; contextTokenAgeMs: number | null } } | null>
   formatError: (err: unknown) => string
 }
 
@@ -149,10 +149,20 @@ async function cmdStatus(_args: string, ctx: Ctx, deps: CommandDeps): Promise<vo
     `daemon: ${probed ? `✅ 运行中 (PID ${probed.status.pid}, 端口 ${probed.status.port ?? '-'})` : '⏸ 未运行（发送时自动拉起）'}`,
     probed ? `daemon 轮询: ${probed.status.running ? '正常' : probed.status.expired ? '❌ session 过期，请重新 login' : '未运行'}` : '',
     probed ? `绑定账号: ${probed.status.accountId ?? '-'} (${probed.status.userId ?? '-'})` : '',
+    probed ? `发送上下文: ${describeContextToken(probed.status)}` : '',
     `本会话前缀: ${state ? `【${state.displayName}】` : '-（未连接）'}`,
     `凭证路径: ${getCredentialsPath()}`,
   ].filter(Boolean)
   deps.notify(lines.join('\n'), 'info')
+}
+
+/** 把 context token 状态翻译成可读文案 */
+function describeContextToken(status: { hasContextToken: boolean; contextTokenAgeMs: number | null }): string {
+  if (!status.hasContextToken) return '❌ 无 token（请给 bot 发一条微信消息激活发送能力）'
+  if (status.contextTokenAgeMs === null) return '⚠️ 仅有磁盘旧 token，有效性未知（发送失败时给 bot 发条消息即可刷新）'
+  const minutes = Math.floor(status.contextTokenAgeMs / 60_000)
+  const age = minutes < 1 ? '刚刷新' : `${minutes} 分钟前刷新`
+  return `✅ ${age}（过期后给 bot 发一条消息即可刷新）`
 }
 
 export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
