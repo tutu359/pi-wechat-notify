@@ -8,13 +8,14 @@
 // ============================================================================
 
 import { spawn } from 'node:child_process'
+import { request as httpRequest } from 'node:http'
 import * as path from 'node:path'
 import * as fs from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { debugLog } from './logger.js'
 import { DAEMON_PORT, DAEMON_FILE, DaemonRoutes, type DaemonInfo } from './daemon-shared.js'
 
-const SPAWN_WAIT_ROUNDS = 25
+const SPAWN_WAIT_ROUNDS = 75
 const SPAWN_WAIT_INTERVAL_MS = 200
 
 export interface DaemonStatus {
@@ -43,32 +44,65 @@ async function readDaemonInfo(): Promise<DaemonInfo | null> {
 
 // --- HTTP ---
 
+/**
+ * 直连本地 daemon 的 HTTP 调用。
+ *
+ * 刻意用 node:http 而不用 fetch：pi 会安装全局代理 dispatcher（settings.httpProxy），
+ * fetch 对 127.0.0.1 的请求也会被劫持，导致 `fetch failed`；node:http 不经该 dispatcher。
+ */
 async function daemonRequest<T>(
   info: DaemonInfo,
   route: string,
   body?: unknown,
   timeoutMs = 15_000,
 ): Promise<T> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const response = await fetch(`http://127.0.0.1:${info.port}${route}`, {
-      method: body !== undefined ? 'POST' : 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${info.token}`,
+  const payload = body === undefined ? undefined : JSON.stringify(body)
+
+  return new Promise<T>((resolve, reject) => {
+    const req = httpRequest(
+      {
+        host: '127.0.0.1',
+        port: info.port,
+        path: route,
+        method: payload === undefined ? 'GET' : 'POST',
+        headers: {
+          ...(payload === undefined
+            ? {}
+            : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }),
+          Authorization: `Bearer ${info.token}`,
+        },
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
+      res => {
+        const chunks: Buffer[] = []
+        res.on('data', chunk => chunks.push(chunk as Buffer))
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf-8')
+          let data: { ok?: boolean; error?: string } & T
+          try {
+            data = (text ? JSON.parse(text) : {}) as { ok?: boolean; error?: string } & T
+          } catch {
+            reject(new DaemonSendError(`daemon ${route} 返回非 JSON: ${text.slice(0, 200)}`))
+            return
+          }
+          const status = res.statusCode ?? 0
+          if (status < 200 || status >= 300 || data?.ok === false) {
+            reject(new DaemonSendError(`daemon ${route} 失败: ${data?.error ?? status}`))
+            return
+          }
+          resolve(data as T)
+        })
+      },
+    )
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`daemon ${route} 超时 (${timeoutMs}ms)`))
     })
-    const data = (await response.json()) as { ok?: boolean; error?: string } & T
-    if (!response.ok || data.ok === false) {
-      throw new DaemonSendError(`daemon ${route} 失败: ${data.error ?? response.status}`)
-    }
-    return data
-  } finally {
-    clearTimeout(timer)
-  }
+    req.on('error', err => {
+      reject(new DaemonSendError(`daemon ${route} 连接失败: ${err.message}`))
+    })
+    if (payload !== undefined) req.write(payload)
+    req.end()
+  })
 }
 
 // --- 探活与拉起 ---
@@ -138,7 +172,8 @@ export async function ensureDaemon(): Promise<DaemonInfo> {
     }
   }
   throw new DaemonSendError(
-    `daemon 拉起失败（等待 ${Math.round((SPAWN_WAIT_ROUNDS * SPAWN_WAIT_INTERVAL_MS) / 1000)}s 无响应）。请检查凭证与日志。`,
+    `daemon 拉起失败（等待 ${Math.round((SPAWN_WAIT_ROUNDS * SPAWN_WAIT_INTERVAL_MS) / 1000)}s 无响应）。` +
+    '请检查凭证与日志（设 PI_WECHAT_DEBUG=1 可输出调试日志）。',
   )
 }
 
