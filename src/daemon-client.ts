@@ -95,7 +95,9 @@ export async function probeDaemon(): Promise<{ info: DaemonInfo; status: DaemonS
         port: info.port,
       },
     }
-  } catch {
+  } catch (err) {
+    // 带上真实原因：否则无法区分「daemon 真的挂了」与「本进程访问 127.0.0.1 被拦截」
+    debugLog(`[daemon-client] 探活失败 (pid=${info.pid}, port=${info.port}): ${formatErr(err)}`)
     return null
   }
 }
