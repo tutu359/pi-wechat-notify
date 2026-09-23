@@ -142,6 +142,8 @@ export class WeixinClient {
   private _seenMessageIds = new Set<string>()
   private _lastActiveUserId: string | null = null
   private _contextTokensDirty = false
+  /** 最近一次刷到 context token 的本机时间（null = 仅从磁盘恢复，年龄未知） */
+  private _contextTokenUpdatedAt: number | null = null
   private _disposed = false
 
   /** 使用静态工厂创建实例（构造函数不执行 I/O） */
@@ -175,6 +177,16 @@ export class WeixinClient {
 
   getKnownUsers(): string[] {
     return Array.from(this.contextTokens.keys())
+  }
+
+  /** 发送所需 context token 是否已缓存 */
+  get hasContextToken(): boolean {
+    return this.contextTokens.has(this.userId)
+  }
+
+  /** context token 年龄（毫秒）；仅从磁盘恢复或未持有则为 null */
+  get contextTokenAgeMs(): number | null {
+    return this._contextTokenUpdatedAt === null ? null : Date.now() - this._contextTokenUpdatedAt
   }
 
   // --- 生命周期 ---
@@ -311,6 +323,7 @@ export class WeixinClient {
       this.contextTokens.set(this.userId, raw.context_token)
       this._lastActiveUserId = this.userId
       this._contextTokensDirty = true
+      this._contextTokenUpdatedAt = Date.now()
       this._schedulePersist()
     }
   }

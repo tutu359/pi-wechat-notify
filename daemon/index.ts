@@ -80,6 +80,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
         userId: client?.userId ?? null,
         accountId: client?.accountId ?? null,
         pid: process.pid,
+        // 诊断用：发送依赖 context token（只能由入站消息刷新）
+        hasContextToken: client?.hasContextToken ?? false,
+        contextTokenAgeMs: client?.contextTokenAgeMs ?? null,
       })
       return
     }
@@ -92,7 +95,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
         await client.sendText(body.userId, body.text)
         sendJson(res, 200, { ok: true })
       } catch (err) {
-        sendJson(res, 500, { ok: false, error: String(err) })
+        sendJson(res, 500, { ok: false, error: describeSendError(err) })
       }
       return
     }
@@ -132,6 +135,20 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
     default:
       sendJson(res, 404, { ok: false, error: `unknown route: ${route}` })
   }
+}
+
+/**
+ * 把底层发送错误翻译成可操作提示。
+ *
+ * 微信 ilink API 在 context token 失效时会返回 `prepare failed`，非常难排查；
+ * 而 context token 只能由「入站消息」刷新（本 daemon 会把入站消息丢弃，但会用它刷新 token）。
+ */
+function describeSendError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  if (/prepare failed/i.test(raw)) {
+    return `${raw}（context token 已失效：请在微信给 bot 发任意一条消息刷新后重试）`
+  }
+  return raw
 }
 
 // --- 客户端与入站消费（拉取即丢弃） ---
