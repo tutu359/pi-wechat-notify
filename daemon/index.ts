@@ -23,8 +23,8 @@ import type { IncomingMessage as WeChatMessage } from '../src/types.js'
 
 const PORT = Number(process.env.PI_WECHAT_DAEMON_PORT ?? DAEMON_PORT)
 
-/** 启动预热拉取的超时：有积压消息时服务端会立即返回，无需等长轮询超时 */
-const PRIME_TIMEOUT_MS = 3_000
+/** 启动预热拉取的超时：有积压消息时服务端会立即返回，1.5s 足够；无积压时只是少量启动开销 */
+const PRIME_TIMEOUT_MS = 1_500
 
 // 每个实例一个唯一 sessionId：确保 acquireLock 能把「另一个 daemon 实例」认定为
 // 外来占用者并拒绝启动。用常量 sessionId 会让第二个实例被当成"自己人"放行，
