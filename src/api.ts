@@ -142,23 +142,22 @@ export async function sendMessage(
   token: string,
   userId: string,
   text: string,
-  contextToken: string,
+  contextToken?: string,
 ): Promise<Record<string, unknown>> {
+  const msg: Record<string, unknown> = {
+    from_user_id: '',
+    to_user_id: userId,
+    client_id: randomUUID(),
+    message_type: 2, // BOT
+    message_state: 2, // FINISH
+    item_list: [{ type: 1, text_item: { text } }],
+  }
+  // context_token 可选：缺失/失效时不带该字段（官方插件同款行为，实测裸发可达）
+  if (contextToken) msg.context_token = contextToken
   return apiPost<Record<string, unknown>>(
     baseUrl,
     '/ilink/bot/sendmessage',
-    {
-      msg: {
-        from_user_id: '',
-        to_user_id: userId,
-        client_id: randomUUID(),
-        message_type: 2, // BOT
-        message_state: 2, // FINISH
-        context_token: contextToken,
-        item_list: [{ type: 1, text_item: { text } }],
-      },
-      base_info: buildBaseInfo(),
-    },
+    { msg, base_info: buildBaseInfo() },
     token,
     15_000,
   )
@@ -291,20 +290,24 @@ export async function sendMediaMessage(
   baseUrl: string,
   token: string,
   userId: string,
-  contextToken: string,
+  contextToken: string | undefined,
   itemList: SendMediaMessageReq['msg']['item_list'],
 ): Promise<Record<string, unknown>> {
-  const body: SendMediaMessageReq = {
-    msg: {
-      from_user_id: '',
-      to_user_id: userId,
-      client_id: randomUUID(),
-      message_type: 2,
-      message_state: 2,
-      context_token: contextToken,
-      item_list: itemList,
-    },
-    base_info: buildBaseInfo(),
+  const msg: Record<string, unknown> = {
+    from_user_id: '',
+    to_user_id: userId,
+    client_id: randomUUID(),
+    message_type: 2,
+    message_state: 2,
+    item_list: itemList,
   }
-  return apiPost<Record<string, unknown>>(baseUrl, '/ilink/bot/sendmessage', body, token, 15_000)
+  // context_token 可选：缺失/失效时不带该字段（实测裸发可达）
+  if (contextToken) msg.context_token = contextToken
+  return apiPost<Record<string, unknown>>(
+    baseUrl,
+    '/ilink/bot/sendmessage',
+    { msg, base_info: buildBaseInfo() },
+    token,
+    15_000,
+  )
 }

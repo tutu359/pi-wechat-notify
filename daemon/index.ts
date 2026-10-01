@@ -94,9 +94,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
     case `POST ${DaemonRoutes.sendText}`: {
       const body = await readBody<{ userId?: string; text?: string }>(req)
       if (!client || expired) { sendJson(res, 409, { ok: false, error: 'daemon 未登录微信' }); return }
-      if (!body?.userId || !body.text) { sendJson(res, 400, { ok: false, error: 'userId/text required' }); return }
+      const { userId, text } = body ?? {}
+      if (!userId || !text) { sendJson(res, 400, { ok: false, error: 'userId/text required' }); return }
+      const sender = client
       try {
-        await client.sendText(body.userId, body.text)
+        await sendWithTokenFallback(() => sender.sendText(userId, text), userId)
         sendJson(res, 200, { ok: true })
       } catch (err) {
         sendJson(res, 500, { ok: false, error: describeSendError(err) })
@@ -108,9 +110,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
     case `POST ${DaemonRoutes.sendImage}`: {
       const body = await readBody<{ userId?: string; imagePath?: string }>(req)
       if (!client || expired) { sendJson(res, 409, { ok: false, error: 'daemon 未登录微信' }); return }
-      if (!body?.userId || !body.imagePath) { sendJson(res, 400, { ok: false, error: 'userId/imagePath required' }); return }
+      const { userId, imagePath } = body ?? {}
+      if (!userId || !imagePath) { sendJson(res, 400, { ok: false, error: 'userId/imagePath required' }); return }
+      const sender = client
       try {
-        await client.sendImage(body.userId, body.imagePath)
+        await sendWithTokenFallback(() => sender.sendImage(userId, imagePath), userId)
         sendJson(res, 200, { ok: true })
       } catch (err) {
         sendJson(res, 500, { ok: false, error: String(err) })
@@ -144,15 +148,32 @@ async function handle(req: IncomingMessage, res: ServerResponse, token: string):
 /**
  * 把底层发送错误翻译成可操作提示。
  *
- * 微信 ilink API 在 context token 失效时会返回 `prepare failed`，非常难排查；
- * 而 context token 只能由「入站消息」刷新（本 daemon 会把入站消息丢弃，但会用它刷新 token）。
+ * context token 失效会返回 `prepare failed`；发送层已内置降级重试
+ * （清 token 后脳发），只有重试也失败才会走到这里。
  */
 function describeSendError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err)
   if (/prepare failed/i.test(raw)) {
-    return `${raw}（context token 已失效：请在微信给 bot 发任意一条消息刷新后重试）`
+    return `${raw}（context token 失效且脳发重试也失败：请在微信给 bot 发任意一条消息后重试）`
   }
   return raw
+}
+
+/**
+ * 发送 + token 失效自动降级：
+ * 缓存 token 过期时服务端返回 prepare failed，此时清掉缓存 token 后脳发
+ * （不带 context_token，实测可达，官方插件同款行为），对上层完全透明。
+ */
+async function sendWithTokenFallback(send: () => Promise<void>, userId: string): Promise<void> {
+  try {
+    await send()
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err)
+    if (!/prepare failed/i.test(raw)) throw err
+    debugLog(`[daemon] context token 已失效，清缓存后脳发重试: ${userId}`)
+    client?.clearContextToken(userId)
+    await send()
+  }
 }
 
 // --- 客户端与入站消费（拉取即丢弃） ---

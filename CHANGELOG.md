@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-01
+
+### Changed
+- 状态栏 `on` 改为真实可用性：每 30s 探活 daemon，on = daemon 存活且未过期（一定能发）；
+  新增 down / expired 展示态
+- context token 失效（prepare failed）时自动清缓存并降级为无 token 胋发重试
+  （实测可达，与官方 @tencent-weixin/openclaw-weixin 行为一致），不再要求用户先从手机发消息刷新
+- 发送前不再等待 context token（最多 8s 宽限），首响更快
+
+### Removed
+- 移除「token 失效需手动手机消息刷新」的人工依赖
+
 ## [0.3.1] - 2026-09-04
 
 ### Security

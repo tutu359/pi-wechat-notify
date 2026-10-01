@@ -62,13 +62,56 @@ export default function wechatAssistant(pi: ExtensionAPI) {
     printer(`[wechat-notify/${level}] ${message}`)
   }
 
+  // --- 状态栏：on = 一定能发（daemon 存活且未过期；token 失效会自动脳发，不影响可达性） ---
+
+  const STATUS_POLL_MS = 30_000
+  let statusTimer: ReturnType<typeof setInterval> | null = null
+  let statusProbeInFlight = false
+  let lastStatusText: string | null = null
+
+  function setStatusText(text: string): void {
+    if (text === lastStatusText) return
+    lastStatusText = text
+    latestCtx?.ui.setStatus('wechat', text)
+  }
+
+  /** 把 daemon 真实状态映射成状态栏文案（不以 [ 开头，避免被 powerline 判为通知类独占一行） */
+  function describeStatus(status: { running: boolean; expired: boolean } | null): string {
+    if (!status) return '\uf075 wechat: down'
+    if (status.expired) return '\uf075 wechat: expired'
+    if (status.running) return '\uf075 wechat: on'
+    return '\uf075 wechat: down'
+  }
+
+  async function refreshStatusBar(): Promise<void> {
+    if (!latestCtx?.hasUI || statusProbeInFlight) return
+    if (!loggedIn) { setStatusText(''); return }
+    statusProbeInFlight = true
+    try {
+      const probe = await probeDaemon()
+      setStatusText(describeStatus(probe?.status ?? null))
+    } finally {
+      statusProbeInFlight = false
+    }
+  }
+
+  function startStatusPolling(): void {
+    if (statusTimer) return
+    statusTimer = setInterval(() => { void refreshStatusBar() }, STATUS_POLL_MS)
+    void refreshStatusBar()
+  }
+
+  function stopStatusPolling(): void {
+    if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
+    setStatusText('')
+  }
+
   function updateStatusBar(): void {
     if (!latestCtx?.hasUI) return
-    if (!loggedIn) { latestCtx.ui.setStatus('wechat', ''); return }
-    const hasDaemon = state?.targetUserId != null
-    // 前缀用 Nerd Font 气泡字形；不要以方括号开头，否则会被 pi-powerline-footer
-    // 判定为“通知类状态”而独占编辑器上方一行。
-    latestCtx.ui.setStatus('wechat', hasDaemon ? '\uf075 wechat: on' : '[wechat: ...]')
+    if (!loggedIn) { setStatusText(''); return }
+    // 先给个中间态，真实状态由周期探活立即接替
+    setStatusText('\uf075 wechat: ...')
+    void refreshStatusBar()
   }
 
   // ============================================================================
@@ -229,13 +272,14 @@ export default function wechatAssistant(pi: ExtensionAPI) {
     }
     registerTools()
     updateStatusBar()
+    startStatusPolling()
     debugLog(`[wechat] 会话已连接通知通道: prefix=${state.displayName}`)
   })
 
   pi.on('session_shutdown', async () => {
     // 只断本会话，daemon 常驻
     state = null
-    updateStatusBar()
+    stopStatusPolling()
   })
 
   // ============================================================================

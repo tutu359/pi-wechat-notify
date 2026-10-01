@@ -255,9 +255,14 @@ export class WeixinClient {
 
   // --- 消息发送 ---
 
+  /** 丢弃缓存 context token：失效后调用，后续发送降级为无 token 苸发（实测可达） */
+  clearContextToken(userId: string): void {
+    this.contextTokens.delete(userId)
+  }
+
   async sendText(userId: string, text: string): Promise<void> {
     const contextToken = this.contextTokens.get(userId)
-    if (!contextToken) throw new Error(`No cached context token for user ${userId}`)
+    if (!contextToken) debugLog(`[send] 无缓存 context token，脳发（不带 context_token）: ${userId}`)
     const message = text.trim()
     if (!message) throw new Error('Message text cannot be empty')
     await apiSendMessage(this.baseUrl, this.token, userId, message, contextToken)
@@ -284,7 +289,7 @@ export class WeixinClient {
     displayName?: string,
   ): Promise<void> {
     const contextToken = this.contextTokens.get(userId)
-    if (!contextToken) throw new Error(`No cached context token for user ${userId}`)
+    if (!contextToken) debugLog(`[send] 无缓存 context token，脳发（不带 context_token）: ${userId}`)
 
     const { rawSize, rawMd5, aesKey, encryptedBuffer } = await encryptFile(filePath)
     const filekey = randomBytes(16).toString('hex')
