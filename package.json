@@ -50,7 +50,8 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
-    "@mariozechner/pi-coding-agent": "*"
+    "@mariozechner/pi-coding-agent": "*",
+    "@sinclair/typebox": "*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
@@ -69,7 +70,6 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.49",
     "qrcode-terminal": "^0.12.0",
     "tsx": "^4.23.15"
   }
