@@ -161,6 +161,31 @@ export default function wechatAssistant(pi: ExtensionAPI) {
       },
     })
 
+    // --- 通道状态（供 Agent 主动查询） ---
+
+    pi.registerTool({
+      name: 'wechat_status',
+      label: 'WeChat Status',
+      description: '查看微信通知通道当前状态。返回 on（一定能发）/ down（daemon 未运行，发送时自动拉起）/ expired（需重新扫码）。发送失败后排查或重要通知前可调用。',
+      promptSnippet: '查看微信通知通道状态',
+      parameters: Type.Object({}),
+      async execute() {
+        if (!loggedIn || !state?.targetUserId) return fail('微信未登录：请在 TUI 执行 /wechat login')
+        const probe = await probeDaemon()
+        if (!probe || !probe.status.running) {
+          return ok('状态: down（daemon 未运行；下次发送时会自动拉起，无需处理）')
+        }
+        const s = probe.status
+        if (s.expired) return fail('状态: expired（微信会话已过期，请在 TUI 执行 /wechat login 重新扫码）')
+        const tokenInfo = !s.hasContextToken
+          ? '无缓存 token（发送自动脳发）'
+          : s.contextTokenAgeMs == null
+            ? 'token 来自磁盘（失效时自动降级脳发）'
+            : `token ${Math.round(s.contextTokenAgeMs / 60_000)} 分钟前刷新`
+        return ok(`状态: on（一定能发）｜daemon PID ${s.pid ?? '-'}｜${tokenInfo}`)
+      },
+    })
+
     // --- 文件通知 ---
 
     pi.registerTool({
